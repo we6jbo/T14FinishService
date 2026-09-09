@@ -10,10 +10,32 @@
     "TG148675"
   ],
   "records": [
-    {"display_name":"William Maynard","code":"TG564843","details":"B:18 May 1830 Pike County, Kentucky, United States of America D:25 March 1908 Pierce County, Washington, United States of America"},
-    {"display_name":"Mary Jane Sumner","code":"TG333041","details":"B:1839 Pennsylvania D:before 1880 Pennsylvania"},
-    {"display_name":"Johannsen","code":"TG323932","details":"B:25 September 1833 D:26 March 1919"},
-    {"display_name":"Amelia Carolina Luedtke","code":"TG610982","details":"Born: February 1850 - Pomerania, Prussia; Died: 24 April 1925 - Henderson, Sibley County, Minnesota, United States"},
-    {"display_name":"Agnes Maria Platt","code":"TG148675","details":"Born: 27 April 1857 - Palmyra, Jefferson County, Wisconsin, United States; Died: 23 February 1946 - Ramsey County, Minnesota, United States"}
-  ]
+    {
+      "display_name": "William Maynard",
+      "code": "TG564843",
+      "details": "B:18 May 1830 Pike County, Kentucky, United States of America D:25 March 1908 Pierce County, Washington, United States of America"
+    },
+    {
+      "display_name": "Mary Jane Sumner",
+      "code": "TG333041",
+      "details": "B:1839 Pennsylvania D:before 1880 Pennsylvania"
+    },
+    {
+      "display_name": "Johannsen",
+      "code": "TG323932",
+      "details": "B:25 September 1833 D:26 March 1919"
+    },
+    {
+      "display_name": "Amelia Carolina Luedtke",
+      "code": "TG610982",
+      "details": "Born: February 1850 - Pomerania, Prussia; Died: 24 April 1925 - Henderson, Sibley County, Minnesota, United States"
+    },
+    {
+      "display_name": "Agnes Maria Platt",
+      "code": "TG148675",
+      "details": "Born: 27 April 1857 - Palmyra, Jefferson County, Wisconsin, United States; Died: 23 February 1946 - Ramsey County, Minnesota, United States"
+    }
+  ],
+  "package_revision": 4,
+  "application_version": "0.3"
 }

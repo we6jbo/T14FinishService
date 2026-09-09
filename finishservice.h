@@ -2,8 +2,8 @@
 
 #include <QObject>
 #include <QTcpServer>
-#include <QJsonObject>
 #include <QDate>
+#include <QJsonObject>
 #include <QTime>
 #include <QString>
 
@@ -38,11 +38,30 @@ private:
     };
 
     struct WeatherDay {
-        bool ok = false;
-        QTime sunset;
+        bool known = false;
+        bool rainy = false;
         double rainMm = 0.0;
         int precipitationProbability = 0;
+        QString source;
         QString error;
+    };
+
+    struct Decision {
+        bool ok = false;
+        QString state;
+        QString reason;
+        QString currentDisplay;
+        QTime currentTime;
+        QTime deadline;
+        QTime sunset;
+        int minutesRemaining = 0;
+        int offsetMinutes = 0;
+        bool rainKnown = false;
+        bool rainy = false;
+        double rainMm = 0.0;
+        int precipitationProbability = 0;
+        QString weatherSource;
+        QString weatherError;
     };
 
     QTcpServer m_server;
@@ -53,8 +72,12 @@ private:
     Safety checkSafety() const;
     int batteryPercent() const;
     WeatherDay fetchWeather(const Context &context) const;
+    QTime localSunset(const QDate &date, double latitude, double longitude, QString *error = nullptr) const;
+    bool currentTimeFromContext(const Context &context, QTime *time, QString *display, QString *error) const;
+    Decision makeDecision(const Context &context) const;
     QString handleCommand(const QString &command);
-    QString deadlineResponse(const Context &context);
+    QString deadlineResponse(const Context &context) const;
+    QString codingStateResponse(const Context &context, bool asJson) const;
     bool specialDay(const QDate &date) const;
     int sunsetOffsetMinutes(const Context &context) const;
     void attemptTgRegistrationOnce();

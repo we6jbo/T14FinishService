@@ -35,7 +35,7 @@ if [[ -f "$STATUS" ]]; then
 import json,sys
 try:
     with open(sys.argv[1], encoding='utf-8') as f:
-        print(int(json.load(f).get('last_push_epoch', 0)))
+        print(int(json.load(f).get('last_push_epoch', 0) or 0))
 except Exception:
     print(0)
 PY
@@ -51,7 +51,12 @@ fi
 python3 - "$STATUS" "$now_iso" "$now_epoch" "$last_push_epoch" "$due" "$battery" "$free_kib" <<'PY'
 import json,sys,os,tempfile
 path, now_iso, now_epoch, last_push, due, battery, free_kib = sys.argv[1:]
-data = {
+try:
+    with open(path, encoding='utf-8') as f:
+        data=json.load(f)
+except Exception:
+    data={}
+data.update({
     "current_time": now_iso,
     "current_epoch": int(now_epoch),
     "last_push_epoch": int(last_push),
@@ -59,7 +64,7 @@ data = {
     "battery_percent": int(battery),
     "free_kib": int(free_kib),
     "minimum_push_interval_seconds": 2400
-}
+})
 os.makedirs(os.path.dirname(path), exist_ok=True)
 fd,tmp=tempfile.mkstemp(prefix='.status.', suffix='.json', dir=os.path.dirname(path))
 with os.fdopen(fd,'w',encoding='utf-8') as f:
@@ -79,7 +84,6 @@ if ! git remote get-url origin >/dev/null 2>&1; then
     git remote add origin "$REMOTE_URL"
 fi
 
-# Make a best-effort fetch so the first backup can inspect the remote branch.
 git fetch origin "$BRANCH" --quiet 2>/dev/null || true
 
 FIRST_MARKER="$STATE_DIR/first_github_backup_complete"
@@ -89,14 +93,11 @@ if [[ ! -e "$FIRST_MARKER" ]]; then
         remote_has_3751=true
     fi
 
-    if [[ "$remote_has_3751" == false ]]; then
-        if [[ ! -f "$PROJECT/3751.txt" ]]; then
-            printf '%s\n' 'T14FinishService GitHub backup verification file 3751' > "$PROJECT/3751.txt"
-        fi
+    if [[ "$remote_has_3751" == false && ! -f "$PROJECT/3751.txt" ]]; then
+        printf '%s\n' 'T14FinishService GitHub backup verification file 3751' > "$PROJECT/3751.txt"
     fi
 fi
 
-# Only stage files belonging to this project package. Existing Qt template files are included.
 FILES=(
   CMakeLists.txt CMakeLists.template-original.txt
   main.cpp mainwindow.cpp mainwindow.h mainwindow.ui
@@ -114,7 +115,6 @@ if ! git diff --cached --quiet; then
     git commit -m "Automatic T14FinishService backup $(date '+%Y-%m-%d %H:%M:%S %Z')"
 fi
 
-# Push even when there was no new commit on the first run, so 3751.txt is verified remotely.
 git push -u origin "$BRANCH"
 
 touch "$FIRST_MARKER"
