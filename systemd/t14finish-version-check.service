@@ -1,0 +1,8 @@
+[Unit]
+Description=T14FinishService weekly public version check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/t14finish-version-check

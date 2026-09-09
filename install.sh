@@ -5,7 +5,7 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="/home/we6jbo/Projects/T14FinishService"
 STATE_DIR="/home/we6jbo/.T14FinishService_backup"
 STATUS="$STATE_DIR/status.json"
-PACKAGE_REVISION=4
+PACKAGE_REVISION=5
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 PREBACKUP="$STATE_DIR/preinstall-$STAMP"
 
@@ -42,6 +42,7 @@ fi
 mkdir -p "$TARGET/scripts" "$TARGET/systemd"
 cp -a "$SOURCE_DIR/scripts/t14-finish" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/scripts/t14finish-git-backup" "$TARGET/scripts/"
+cp -a "$SOURCE_DIR/scripts/t14finish-version-check" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/systemd/"*.service "$TARGET/systemd/"
 cp -a "$SOURCE_DIR/systemd/"*.timer "$TARGET/systemd/"
 cp -a "$SOURCE_DIR/install.sh" "$TARGET/install.sh"
@@ -49,9 +50,12 @@ chmod +x "$TARGET/install.sh" "$TARGET/scripts/"*
 
 install -m 0755 "$TARGET/scripts/t14-finish" /home/we6jbo/.local/bin/t14-finish
 install -m 0755 "$TARGET/scripts/t14finish-git-backup" /home/we6jbo/.local/bin/t14finish-git-backup
+install -m 0755 "$TARGET/scripts/t14finish-version-check" /home/we6jbo/.local/bin/t14finish-version-check
 install -m 0644 "$TARGET/systemd/t14-finish-service.service" /home/we6jbo/.config/systemd/user/t14-finish-service.service
 install -m 0644 "$TARGET/systemd/t14finish-git-backup.service" /home/we6jbo/.config/systemd/user/t14finish-git-backup.service
 install -m 0644 "$TARGET/systemd/t14finish-git-backup.timer" /home/we6jbo/.config/systemd/user/t14finish-git-backup.timer
+install -m 0644 "$TARGET/systemd/t14finish-version-check.service" /home/we6jbo/.config/systemd/user/t14finish-version-check.service
+install -m 0644 "$TARGET/systemd/t14finish-version-check.timer" /home/we6jbo/.config/systemd/user/t14finish-version-check.timer
 
 # Record this package revision without erasing the 40-minute Git backup state.
 now_iso=$(date --iso-8601=seconds)
@@ -73,11 +77,11 @@ if not any(isinstance(x,dict) and x.get('revision') == revision for x in history
     history.append({
         "revision":revision,
         "installed_at":iso,
-        "package":"T14FinishService-v4.zip",
+        "package":"T14FinishService-v5.zip",
         "install_commands":[
             "cd ~/Downloads",
-            "unzip T14FinishService-v4.zip",
-            "cd T14FinishService_v4_package",
+            "unzip T14FinishService-v5.zip",
+            "cd T14FinishService_v5_package",
             "./install.sh"
         ]
     })
@@ -116,6 +120,7 @@ cmake --build build/Desktop_Debug
 systemctl --user daemon-reload
 systemctl --user enable --now t14-finish-service.service
 systemctl --user enable --now t14finish-git-backup.timer
+systemctl --user enable --now t14finish-version-check.timer
 
 /home/we6jbo/.local/bin/t14finish-git-backup || true
 
@@ -126,5 +131,7 @@ printf 'Test: t14-finish ping\n'
 printf 'Deadline: t14-finish deadline\n'
 printf 'AI state: t14-finish coding-state\n'
 printf 'AI JSON: t14-finish coding-state --json\n'
+printf 'Version timer: systemctl --user status t14finish-version-check.timer\n'
+printf 'Version state: python3 -m json.tool /home/we6jbo/.T14FinishService_backup/status.json\n'
 printf '\nIf the service fails to start, check whether a Qt Creator test copy already owns port 45454:\n'
 printf '  ss -ltnp | grep 45454\n'

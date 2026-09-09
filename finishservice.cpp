@@ -28,7 +28,7 @@ namespace {
 constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
-constexpr int kPackageRevision = 4;
+constexpr int kPackageRevision = 5;
 constexpr const char *kProjectId = "t14-finish-service-v1";
 constexpr const char *kCodes = "TG564843,TG333041,TG323932,TG610982,TG148675";
 

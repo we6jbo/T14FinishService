@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${HOME}/.T14FinishService_backup"
+STATUS="${STATE_DIR}/status.json"
+URL="https://j03.page/t14finishservice/"
+SECONDS_PER_WEEK=604800
+MIN_BATTERY=55
+MIN_FREE_KIB=$((10 * 1024 * 1024))
+
+battery_percent() {
+    local f
+    for f in /sys/class/power_supply/BAT*/capacity; do
+        [[ -r "$f" ]] || continue
+        tr -dc '0-9' < "$f"
+        return 0
+    done
+    return 1
+}
+
+# Safety gate 1: disk. Do not create/write state if this fails.
+free_kib=$(df -Pk "$HOME" | awk 'NR==2 {print $4}')
+if [[ ! "$free_kib" =~ ^[0-9]+$ ]] || (( free_kib < MIN_FREE_KIB )); then
+    echo "T14FinishService version check skipped: less than 10 GiB free disk space."
+    exit 0
+fi
+
+# Safety gate 2: battery. Do not create/write state if this fails.
+battery=$(battery_percent || true)
+if [[ ! "$battery" =~ ^[0-9]+$ ]] || (( battery < MIN_BATTERY )); then
+    if [[ "$battery" =~ ^[0-9]+$ ]]; then
+        echo "T14FinishService version check skipped: battery is ${battery}%; at least 55% is required."
+    else
+        echo "T14FinishService version check skipped: battery percentage could not be read."
+    fi
+    exit 0
+fi
+
+mkdir -p "$STATE_DIR"
+now_epoch=$(date +%s)
+now_iso=$(date --iso-8601=seconds)
+
+# Read the last actual web-check attempt. Merely waking up does not count as a check.
+last_attempt=0
+if [[ -r "$STATUS" ]]; then
+    last_attempt=$(python3 - "$STATUS" <<'PY'
+import json,sys
+try:
+    with open(sys.argv[1], encoding='utf-8') as f:
+        d=json.load(f)
+    print(int(d.get('version_check',{}).get('last_attempt_epoch',0) or 0))
+except Exception:
+    print(0)
+PY
+)
+fi
+
+# The timer may wake more often for resilience, but the website is never fetched
+# more than once per seven days unless the user explicitly runs --force.
+force=0
+if [[ "${1:-}" == "--force" ]]; then
+    force=1
+fi
+if (( ! force && last_attempt > 0 && now_epoch - last_attempt < SECONDS_PER_WEEK )); then
+    exit 0
+fi
+
+# Record the attempt before network access so a failed request does not cause repeated
+# website hits during the same week. This write is allowed because both safety gates passed.
+python3 - "$STATUS" "$now_iso" "$now_epoch" "$URL" <<'PY'
+import json,sys,os,tempfile
+path,iso,epoch,url=sys.argv[1:]
+try:
+    with open(path,encoding='utf-8') as f:
+        d=json.load(f)
+except Exception:
+    d={}
+vc=d.get('version_check')
+if not isinstance(vc,dict): vc={}
+vc.update({
+    'url':url,
+    'target_marker':'Version 2.0',
+    'cadence_seconds':604800,
+    'last_attempt_at':iso,
+    'last_attempt_epoch':int(epoch)
+})
+d['version_check']=vc
+fd,tmp=tempfile.mkstemp(prefix='.status.',suffix='.json',dir=os.path.dirname(path))
+with os.fdopen(fd,'w',encoding='utf-8') as f:
+    json.dump(d,f,indent=2); f.write('\n')
+os.replace(tmp,path)
+PY
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+if ! curl -fsSL --max-time 20 --connect-timeout 10 -A 'T14FinishService/0.5 weekly-version-check' "$URL" -o "$tmp"; then
+    echo "T14FinishService weekly version check could not retrieve ${URL}"
+    exit 0
+fi
+
+# The supplied WordPress page renders the public marker as a paragraph such as:
+# <p class="wp-block-paragraph">Version 2.0</p>
+if grep -Eiq '<p[^>]*>[[:space:]]*Version[[:space:]]+2\.0[[:space:]]*</p>' "$tmp"; then
+    message="There's a new version of T14FinishService available. Go to ${URL} to download the new version."
+    found=true
+else
+    message="No Version 2.0 update marker was found."
+    found=false
+fi
+
+# Save only small result metadata, never the downloaded page.
+python3 - "$STATUS" "$now_iso" "$found" "$message" <<'PY'
+import json,sys,os,tempfile
+path,iso,found,message=sys.argv[1:]
+try:
+    with open(path,encoding='utf-8') as f:
+        d=json.load(f)
+except Exception:
+    d={}
+vc=d.get('version_check')
+if not isinstance(vc,dict): vc={}
+vc.update({
+    'last_completed_at':iso,
+    'version_2_0_found': found.lower()=='true',
+    'last_message':message
+})
+d['version_check']=vc
+fd,tmp=tempfile.mkstemp(prefix='.status.',suffix='.json',dir=os.path.dirname(path))
+with os.fdopen(fd,'w',encoding='utf-8') as f:
+    json.dump(d,f,indent=2); f.write('\n')
+os.replace(tmp,path)
+PY
+
+if [[ "$found" == true ]]; then
+    printf '%s\n' "$message"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send --app-name="T14FinishService" "T14FinishService update available" "$message" || true
+    fi
+fi

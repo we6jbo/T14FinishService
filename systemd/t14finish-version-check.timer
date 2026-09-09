@@ -1,0 +1,13 @@
+[Unit]
+Description=T14FinishService weekly version-check scheduler
+
+[Timer]
+# Wake daily so a low-battery day does not postpone the check for a whole week.
+# The checker itself enforces a strict 604800-second minimum between web requests.
+OnBootSec=10min
+OnUnitActiveSec=1d
+AccuracySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

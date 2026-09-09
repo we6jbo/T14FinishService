@@ -99,3 +99,28 @@ Embedded codes:
 - TG148675
 
 They remain in source metadata, `tg_context_snapshot.json`, status responses, and the best-effort `tg-register-project` invocation. Normal project operation does not require the private TG registry database.
+
+## Revision 5: weekly public version check
+
+Revision 5 adds a safety-gated public update check for:
+
+https://j03.page/t14finishservice/
+
+The checker recognizes the WordPress paragraph marker `Version 2.0`. It will make at most one normal web request per 604800 seconds (7 days). A user-systemd timer wakes daily only so that a battery/disk safety failure can be retried later; the script itself prevents the website from being fetched more than once per week.
+
+Before any update-check state is written or the page is fetched, the checker requires at least 55% battery and at least 10 GiB free disk space. If the page contains the Version 2.0 marker, it prints and, when `notify-send` is available, displays:
+
+`There's a new version of T14FinishService available. Go to https://j03.page/t14finishservice/ to download the new version.`
+
+The downloaded HTML is temporary and is deleted after the check. Only compact metadata about the check is retained in `/home/we6jbo/.T14FinishService_backup/status.json`.
+
+Useful commands:
+
+```bash
+systemctl --user status t14finish-version-check.timer
+systemctl --user list-timers | grep t14finish-version-check
+journalctl --user -u t14finish-version-check.service -n 30 --no-pager
+python3 -m json.tool /home/we6jbo/.T14FinishService_backup/status.json
+```
+
+For an explicit manual diagnostic only, `t14finish-version-check --force` bypasses the weekly cadence check but still honors the battery and disk safety gates.
