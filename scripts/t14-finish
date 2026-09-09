@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cmd="${1:-status}"
+exec 3<>/dev/tcp/127.0.0.1/45454
+printf '%s\n' "$cmd" >&3
+IFS= read -r reply <&3 || true
+printf '%s\n' "$reply"
+exec 3>&-

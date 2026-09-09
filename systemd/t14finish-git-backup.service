@@ -1,0 +1,8 @@
+[Unit]
+Description=Check whether T14FinishService is due for a 40-minute GitHub backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/we6jbo/.local/bin/t14finish-git-backup

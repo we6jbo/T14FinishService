@@ -1,0 +1,15 @@
+[Unit]
+Description=T14FinishService background Qt service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/we6jbo/Projects/T14FinishService/build/Desktop_Debug/T14FinishService
+Restart=on-failure
+RestartSec=5
+Environment=WE6JBO_CONTEXT_FILE=/home/we6jbo/.local/state/we6jbo-context/context.json
+WorkingDirectory=/home/we6jbo/Projects/T14FinishService
+
+[Install]
+WantedBy=default.target
