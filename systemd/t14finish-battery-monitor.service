@@ -1,0 +1,6 @@
+[Unit]
+Description=T14FinishService low-overhead battery usage sampler
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/t14finish-battery-monitor sample baseline

@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+import json, os, statistics, sys, tempfile, time
+from datetime import datetime
+
+STATE_DIR = os.path.expanduser('~/.T14FinishService_backup')
+DATA = os.path.join(STATE_DIR, 'battery_usage.json')
+STATUS = os.path.join(STATE_DIR, 'status.json')
+MIN_FREE_BYTES = 10 * 1024**3
+LOW_BATTERY = 55
+MAX_SAMPLES = 2016  # about 14 days at a 10-minute cadence
+MIN_LEARNING_SAMPLES = 5
+
+LOW_COST_ALWAYS = {'baseline', 'cache_read', 'local_compute', 'deadline', 'coding_state'}
+
+def atomic_json(path, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix='.' + os.path.basename(path) + '.', suffix='.tmp', dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(obj, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, path)
+    except Exception:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+
+def read_int(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            return int(f.read().strip())
+    except Exception:
+        return None
+
+def battery_path():
+    base='/sys/class/power_supply'
+    try:
+        for name in sorted(os.listdir(base)):
+            if name.startswith('BAT') and os.path.isdir(os.path.join(base,name)):
+                return os.path.join(base,name)
+    except Exception:
+        pass
+    return None
+
+def sample_battery(category='baseline'):
+    bp=battery_path()
+    if not bp:
+        return {'ok':False,'error':'battery not found','category':category}
+    cap=read_int(os.path.join(bp,'capacity'))
+    status='unknown'
+    try:
+        with open(os.path.join(bp,'status'),encoding='utf-8') as f: status=f.read().strip()
+    except Exception: pass
+    power_uw=read_int(os.path.join(bp,'power_now'))
+    if power_uw is None:
+        current_ua=read_int(os.path.join(bp,'current_now'))
+        voltage_uv=read_int(os.path.join(bp,'voltage_now'))
+        if current_ua is not None and voltage_uv is not None:
+            power_uw=(current_ua*voltage_uv)//1_000_000
+    energy_uwh=read_int(os.path.join(bp,'energy_now'))
+    if energy_uwh is None:
+        charge_uah=read_int(os.path.join(bp,'charge_now'))
+        voltage_uv=read_int(os.path.join(bp,'voltage_now'))
+        if charge_uah is not None and voltage_uv is not None:
+            energy_uwh=(charge_uah*voltage_uv)//1_000_000
+    return {
+        'ok': True,
+        'timestamp': datetime.now().astimezone().isoformat(timespec='seconds'),
+        'epoch': int(time.time()),
+        'category': category,
+        'capacity_percent': cap,
+        'status': status,
+        'power_w': None if power_uw is None else round(power_uw/1_000_000.0,3),
+        'energy_wh': None if energy_uwh is None else round(energy_uwh/1_000_000.0,3),
+    }
+
+def load_data():
+    try:
+        with open(DATA,encoding='utf-8') as f: d=json.load(f)
+        if not isinstance(d,dict): raise ValueError
+    except Exception:
+        d={'schema':1,'samples':[],'policies':{}}
+    if not isinstance(d.get('samples'),list): d['samples']=[]
+    if not isinstance(d.get('policies'),dict): d['policies']={}
+    return d
+
+def discharging_powers(samples, category):
+    vals=[]
+    for s in samples:
+        if not isinstance(s,dict) or s.get('category') != category: continue
+        if str(s.get('status','')).lower() != 'discharging': continue
+        p=s.get('power_w')
+        if isinstance(p,(int,float)) and p > 0: vals.append(float(p))
+    return vals
+
+def compute_policy(data, feature):
+    if feature in LOW_COST_ALWAYS:
+        return {'policy':'ALLOW','reason':'known low-cost local operation','learned':False}
+    samples=data.get('samples',[])
+    base=discharging_powers(samples,'baseline')
+    feat=discharging_powers(samples,feature)
+    if len(base) < MIN_LEARNING_SAMPLES or len(feat) < MIN_LEARNING_SAMPLES:
+        return {'policy':'ALLOW','reason':f'learning: need at least {MIN_LEARNING_SAMPLES} baseline and feature samples','learned':False,
+                'baseline_samples':len(base),'feature_samples':len(feat)}
+    bm=statistics.median(base); fm=statistics.median(feat); delta=fm-bm; ratio=(fm/bm if bm>0 else 1.0)
+    if ratio >= 1.35 and delta >= 1.5:
+        policy='BLOCK'; reason='learned feature drain is substantially above baseline'
+    elif ratio >= 1.15 and delta >= 0.75:
+        policy='MINIMIZE'; reason='learned feature drain is moderately above baseline'
+    else:
+        policy='ALLOW'; reason='learned feature drain is close to baseline'
+    return {'policy':policy,'reason':reason,'learned':True,'baseline_median_w':round(bm,3),
+            'feature_median_w':round(fm,3),'difference_w':round(delta,3),'ratio':round(ratio,3),
+            'baseline_samples':len(base),'feature_samples':len(feat)}
+
+def save_sample(category):
+    if os.statvfs(os.path.expanduser('~')).f_bavail * os.statvfs(os.path.expanduser('~')).f_frsize < MIN_FREE_BYTES:
+        print('SKIP_DISK')
+        return 0
+    d=load_data(); s=sample_battery(category)
+    if not s.get('ok'):
+        print('BATTERY_UNKNOWN')
+        return 0
+    d['samples'].append(s); d['samples']=d['samples'][-MAX_SAMPLES:]
+    categories={x.get('category') for x in d['samples'] if isinstance(x,dict) and x.get('category')}
+    d['policies']={c:compute_policy(d,c) for c in sorted(categories)}
+    d['updated_at']=s['timestamp']; d['low_battery_threshold_percent']=LOW_BATTERY
+    atomic_json(DATA,d)
+    # Keep only a compact summary in status.json.
+    try:
+        with open(STATUS,encoding='utf-8') as f: st=json.load(f)
+        if not isinstance(st,dict): st={}
+    except Exception: st={}
+    st['battery_monitor']={
+        'last_sample_at':s['timestamp'],'capacity_percent':s.get('capacity_percent'),'status':s.get('status'),
+        'power_w':s.get('power_w'),'sample_category':category,
+        'policy_file':DATA,'sample_count':len(d['samples'])
+    }
+    atomic_json(STATUS,st)
+    print(json.dumps(s,separators=(',',':')))
+    return 0
+
+def policy(feature):
+    d=load_data(); s=sample_battery('policy_probe')
+    cap=s.get('capacity_percent') if s.get('ok') else None
+    p=compute_policy(d,feature)
+    # The learned restriction applies only below 55%. At or above 55%, always allow.
+    if isinstance(cap,int) and cap >= LOW_BATTERY:
+        p={'policy':'ALLOW','reason':'battery is at or above 55%','learned':p.get('learned',False),**{k:v for k,v in p.items() if k not in ('policy','reason')}}
+    p['feature']=feature; p['battery_percent']=cap; p['threshold_percent']=LOW_BATTERY
+    print(json.dumps(p,separators=(',',':')))
+    return 0
+
+def report():
+    d=load_data(); s=sample_battery('report_probe')
+    out={'battery':s,'sample_count':len(d.get('samples',[])),'policies':d.get('policies',{}),'data_file':DATA}
+    print(json.dumps(out,separators=(',',':')))
+    return 0
+
+def main():
+    cmd=sys.argv[1] if len(sys.argv)>1 else 'sample'
+    if cmd=='sample': return save_sample(sys.argv[2] if len(sys.argv)>2 else 'baseline')
+    if cmd=='policy': return policy(sys.argv[2] if len(sys.argv)>2 else 'unknown')
+    if cmd=='report': return report()
+    print('usage: t14finish-battery-monitor sample [category] | policy <feature> | report',file=sys.stderr); return 2
+
+if __name__=='__main__':
+    raise SystemExit(main())

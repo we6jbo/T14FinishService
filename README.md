@@ -1,55 +1,30 @@
-# T14FinishService v0.3.1 / package revision 4
+# T14FinishService revision 7
 
-T14FinishService is a background-only Qt 6/C++ service for the Manjaro T14. It has no GUI. Bash scripts, ChatGPT/Claude-assisted workflows, and other local tools can query it over localhost TCP port 45454.
+T14FinishService is a background-only Qt/C++ service for the Manjaro T14. It supplies coding-session decisions to Bash scripts and AI coding tools through localhost port 45454.
 
-The original Qt Creator template source files (`main.cpp`, `mainwindow.cpp`, `mainwindow.h`, and `mainwindow.ui`) remain in the project directory unchanged. The background executable is built from `service_main.cpp`, `finishservice.cpp`, and `finishservice.h`.
+## Revision 7: adaptive battery use
 
-## Revision 4 fix
+Revision 7 keeps the 55% battery check but changes its meaning. Battery below 55% no longer disables the whole service. Low-cost operations such as reading the local cache, reading the context file, calculating sunset/deadlines, and returning coding-state information remain available. Features that may use more CPU, network, or disk are monitored separately and can be minimized or deferred only after the T14 has collected enough battery-use evidence to show that the feature consumes materially more power than the machine's normal baseline.
 
-- Adds `t14-finish coding-state` for a simple AI-friendly decision: `KEEP_CODING`, `FINISH_CODING`, `STOP_SAFETY`, or `TIME_HIDDEN`.
-- Adds `t14-finish coding-state --json` with the deadline, minutes remaining, battery, disk, weather/rain status, local sunset, reason, and next action.
-- Uses a local astronomical sunset calculation for San Carlos / the Cowles Mountain area. Sunset calculation does not require the Internet and works for the 2026-2027 project period.
-- Uses Open-Meteo only for the rain forecast. If the weather lookup fails, the service uses the normal non-rain schedule rather than inventing a rain forecast. This is the conservative choice for preserving travel/hiking time.
-- Adds a 10-second weather request timeout so a network problem cannot hang the service indefinitely.
-- Keeps the 55% battery and 10 GiB free-space safety gates.
-- Preserves the WE6JBO context contract. If `time.visible` is false, the service will not expose or infer a clock time or deadline.
-- Fixes the Qt/GCC `QTimeZone` vexing-parse build error found in revision 3.
-- Records package revision 4 and ZIP milestone progress in `/home/we6jbo/.T14FinishService_backup/status.json` without erasing the 40-minute Git backup state.
+A low-overhead user systemd timer samples battery telemetry every 10 minutes. Data is stored in:
 
-## Schedule
+`/home/we6jbo/.T14FinishService_backup/battery_usage.json`
 
-Normal deadlines:
+A compact current summary is also stored under `battery_monitor` in:
 
-- Nov 11, 2026; Nov 23-27, 2026; Dec 21, 2026-Jan 1, 2027; Jan 18, 2027; Mar 29-Apr 5, 2027; May 31, 2027; Saturday; Sunday: sunset minus 250 minutes.
-- Monday or Tuesday: sunset minus 225 minutes.
-- Wednesday, Thursday, or Friday: sunset minus 235 minutes.
+`/home/we6jbo/.T14FinishService_backup/status.json`
 
-Rain overrides:
+The monitor reads battery capacity/status and, when exposed by Linux, instantaneous `power_now`; it falls back to `current_now * voltage_now` when needed. Learning uses discharging samples only so charging behavior does not distort the baseline.
 
-- Monday or Tuesday: 6:45 PM.
-- Wednesday through Saturday: 4:45 PM.
-- Sunday has no special rain override in the supplied rules, so Sunday continues to use sunset minus 250 minutes.
+The current learning rule requires at least five baseline samples and five samples for a feature before restricting it. Until enough evidence exists, the feature is allowed rather than being blocked merely because battery is below 55%. Known low-cost local/cache operations are always allowed. A feature is learned as `MINIMIZE` when its median draw is moderately above baseline, and `BLOCK` when it is substantially above baseline. These policies are only enforced below 55%; at or above 55% they resolve to `ALLOW`.
 
-Note: sunset minus 250 minutes means 250 minutes before sunset.
+Weather keeps the cache-first behavior from revision 6. If learned telemetry says weather network refresh should be minimized while battery is low, the service first accepts a cached forecast up to 24 hours old. If the learned policy reaches BLOCK, it does not contact the weather service while below 55% and instead uses cached data when available. Sunset remains a local 365-day cache/calculation and does not require Internet access.
 
-## Install
+Git backups and the weekly j03.page version check now consult the learned battery policy instead of using a blanket 55% cutoff. They record their own battery-use samples around the network/disk activity.
 
-```bash
-cd ~/Downloads
-unzip T14FinishService-v4.zip
-cd T14FinishService_v4_package
-./install.sh
-```
+The hard disk-space gate remains unchanged: if less than 10 GiB is free, T14FinishService does not perform normal state/cache writes or high-level work.
 
-The installer updates:
-
-`/home/we6jbo/Projects/T14FinishService`
-
-and backs up package-managed files first under:
-
-`/home/we6jbo/.T14FinishService_backup/preinstall-YYYYMMDD-HHMMSS/`
-
-## Verify
+## Useful commands
 
 ```bash
 t14-finish ping
@@ -57,70 +32,27 @@ t14-finish status
 t14-finish deadline
 t14-finish coding-state
 t14-finish coding-state --json
-cat /home/we6jbo/.T14FinishService_backup/status.json
-systemctl --user status t14-finish-service.service
-systemctl --user status t14finish-git-backup.timer
-ss -ltnp | grep 45454
+t14-finish battery-policy --json
 ```
 
-## AI workflow
-
-Before beginning another substantial feature, an AI coding workflow can run:
+Direct battery helper commands:
 
 ```bash
-t14-finish coding-state
+t14finish-battery-monitor report
+t14finish-battery-monitor policy weather_network
+t14finish-battery-monitor policy git_backup
+t14finish-battery-monitor policy version_check
 ```
 
-- `KEEP_CODING`: another coding task may be started.
-- `FINISH_CODING`: stop adding features and switch to compile, test, debug, documentation, and save/backup work.
-- `STOP_SAFETY`: stop writes until the battery and disk-space safety gates pass.
-- `TIME_HIDDEN`: do not infer a deadline because the context policy hides time.
-
-For machine-readable details:
+Timer verification:
 
 ```bash
-t14-finish coding-state --json
+systemctl --user status t14finish-battery-monitor.timer
+systemctl --user list-timers | grep t14finish-battery
 ```
 
-## Git backup
+## Existing behavior retained
 
-The user-systemd timer checks every five minutes. A Git commit/push is attempted only after at least 2,400 seconds (40 minutes) have elapsed since the previous successful push. On the first backup it verifies `3751.txt` on `origin/master`; when absent remotely, the local project copy is staged and pushed. The backup helper requires at least 55% battery and 10 GiB free disk.
+The service still honors `WE6JBO_CONTEXT_FILE` (or `/home/we6jbo/.local/state/we6jbo-context/context.json`), the hidden-time policy, San Carlos/San Diego weather and sunset rules, the holiday/weekend/weekday/rain schedule, portable TG provenance metadata, 40-minute Git backup workflow, weekly j03.page update check, and package milestone tracking. Original Qt Creator template files remain preserved and are not compiled into the background-only service.
 
-## Portable TG provenance
-
-Stable project ID: `t14-finish-service-v1`
-
-Embedded codes:
-
-- TG564843
-- TG333041
-- TG323932
-- TG610982
-- TG148675
-
-They remain in source metadata, `tg_context_snapshot.json`, status responses, and the best-effort `tg-register-project` invocation. Normal project operation does not require the private TG registry database.
-
-## Revision 5: weekly public version check
-
-Revision 5 adds a safety-gated public update check for:
-
-https://j03.page/t14finishservice/
-
-The checker recognizes the WordPress paragraph marker `Version 2.0`. It will make at most one normal web request per 604800 seconds (7 days). A user-systemd timer wakes daily only so that a battery/disk safety failure can be retried later; the script itself prevents the website from being fetched more than once per week.
-
-Before any update-check state is written or the page is fetched, the checker requires at least 55% battery and at least 10 GiB free disk space. If the page contains the Version 2.0 marker, it prints and, when `notify-send` is available, displays:
-
-`There's a new version of T14FinishService available. Go to https://j03.page/t14finishservice/ to download the new version.`
-
-The downloaded HTML is temporary and is deleted after the check. Only compact metadata about the check is retained in `/home/we6jbo/.T14FinishService_backup/status.json`.
-
-Useful commands:
-
-```bash
-systemctl --user status t14finish-version-check.timer
-systemctl --user list-timers | grep t14finish-version-check
-journalctl --user -u t14finish-version-check.service -n 30 --no-pager
-python3 -m json.tool /home/we6jbo/.T14FinishService_backup/status.json
-```
-
-For an explicit manual diagnostic only, `t14finish-version-check --force` bypasses the weekly cadence check but still honors the battery and disk safety gates.
+Package revision: 7 of the planned 19-revision development workflow.

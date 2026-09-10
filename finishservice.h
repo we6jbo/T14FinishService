@@ -72,7 +72,12 @@ private:
     Safety checkSafety() const;
     int batteryPercent() const;
     WeatherDay fetchWeather(const Context &context) const;
+    WeatherDay readWeatherCache(const QDate &date, int maxAgeSeconds) const;
+    void writeWeatherCache(const QJsonObject &dailyObject, double latitude, double longitude, const QString &source) const;
+    QTime cachedSunset(const QDate &date, double latitude, double longitude, QString *error = nullptr) const;
+    void ensureSunsetCache(const QDate &anchorDate, double latitude, double longitude) const;
     QTime localSunset(const QDate &date, double latitude, double longitude, QString *error = nullptr) const;
+    QString cacheDirectory() const;
     bool currentTimeFromContext(const Context &context, QTime *time, QString *display, QString *error) const;
     Decision makeDecision(const Context &context) const;
     QString handleCommand(const QString &command);
@@ -82,4 +87,6 @@ private:
     int sunsetOffsetMinutes(const Context &context) const;
     void attemptTgRegistrationOnce();
     QString compactJson(const QJsonObject &obj) const;
+    QString batteryFeaturePolicy(const QString &feature) const;
+    void recordBatteryActivity(const QString &category) const;
 };

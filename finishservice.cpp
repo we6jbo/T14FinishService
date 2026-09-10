@@ -14,6 +14,7 @@
 #include <QNetworkRequest>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QStorageInfo>
 #include <QTcpSocket>
 #include <QTimeZone>
@@ -28,7 +29,7 @@ namespace {
 constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
-constexpr int kPackageRevision = 5;
+constexpr int kPackageRevision = 7;
 constexpr const char *kProjectId = "t14-finish-service-v1";
 constexpr const char *kCodes = "TG564843,TG333041,TG323932,TG610982,TG148675";
 
@@ -41,6 +42,8 @@ constexpr const char *kDefaultTimeZone = "America/Los_Angeles";
 constexpr double kOfficialZenithDegrees = 90.833;
 constexpr double kPi = 3.14159265358979323846;
 constexpr int kWeatherTimeoutMs = 10000;
+constexpr int kWeatherCacheMaxAgeSeconds = 6 * 60 * 60;
+constexpr int kSunsetCacheDays = 365;
 
 static double normalizeDegrees(double value)
 {
@@ -175,14 +178,103 @@ FinishService::Safety FinishService::checkSafety() const
         s.reason = "less than 10 GiB of free disk space";
         return s;
     }
-    if (s.batteryPercent < kMinimumBatteryPercent) {
-        s.reason = s.batteryPercent < 0
-            ? "battery percentage could not be read"
-            : QString("battery is %1%; at least 55% is required").arg(s.batteryPercent);
-        return s;
-    }
+    // Revision 7 keeps the 55% battery check, but it is no longer a blanket stop.
+    // Low-cost local/cache operations remain available below 55%; learned high-drain
+    // features are minimized or blocked individually. Disk space remains a hard gate.
     s.ok = true;
+    if (s.batteryPercent < 0)
+        s.reason = "battery percentage could not be read; adaptive battery policy is unavailable";
+    else if (s.batteryPercent < kMinimumBatteryPercent)
+        s.reason = QString("battery is %1%; adaptive low-battery policy is active").arg(s.batteryPercent);
     return s;
+}
+
+QString FinishService::cacheDirectory() const
+{
+    return QDir::homePath() + "/.T14FinishService_backup/cache";
+}
+
+FinishService::WeatherDay FinishService::readWeatherCache(const QDate &date, int maxAgeSeconds) const
+{
+    WeatherDay out;
+    QFile f(cacheDirectory() + "/weather.json");
+    if (!f.open(QIODevice::ReadOnly))
+        return out;
+
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject())
+        return out;
+
+    const QJsonObject root = doc.object();
+    const QJsonObject days = root.value("days").toObject();
+    const QJsonObject day = days.value(date.toString(Qt::ISODate)).toObject();
+    if (day.isEmpty())
+        return out;
+
+    const QDateTime fetched = QDateTime::fromString(day.value("fetched_at").toString(), Qt::ISODate);
+    if (!fetched.isValid() || fetched.secsTo(QDateTime::currentDateTime()) > maxAgeSeconds)
+        return out;
+
+    out.known = true;
+    out.rainMm = day.value("rain_mm").toDouble();
+    out.precipitationProbability = day.value("precipitation_probability").toInt();
+    out.rainy = day.value("rainy").toBool();
+    out.source = day.value("source").toString() + " [cache]";
+    return out;
+}
+
+void FinishService::writeWeatherCache(const QJsonObject &dailyObject, double latitude, double longitude, const QString &source) const
+{
+    const QJsonArray dates = dailyObject.value("time").toArray();
+    const QJsonArray rain = dailyObject.value("rain_sum").toArray();
+    const QJsonArray prob = dailyObject.value("precipitation_probability_max").toArray();
+    if (dates.isEmpty())
+        return;
+
+    QDir().mkpath(cacheDirectory());
+    const QString path = cacheDirectory() + "/weather.json";
+    QJsonObject root;
+    QFile existing(path);
+    if (existing.open(QIODevice::ReadOnly)) {
+        QJsonParseError pe;
+        const QJsonDocument doc = QJsonDocument::fromJson(existing.readAll(), &pe);
+        if (pe.error == QJsonParseError::NoError && doc.isObject())
+            root = doc.object();
+    }
+
+    QJsonObject days = root.value("days").toObject();
+    const QString fetchedAt = QDateTime::currentDateTime().toString(Qt::ISODate);
+    for (int i = 0; i < dates.size(); ++i) {
+        const QString date = dates.at(i).toString();
+        if (date.isEmpty())
+            continue;
+        const double rainMm = i < rain.size() ? rain.at(i).toDouble() : 0.0;
+        const int probability = i < prob.size() ? prob.at(i).toInt() : 0;
+        QJsonObject day;
+        day["fetched_at"] = fetchedAt;
+        day["rain_mm"] = rainMm;
+        day["precipitation_probability"] = probability;
+        day["rainy"] = rainMm > 0.0 || probability >= 50;
+        day["source"] = source;
+        days[date] = day;
+    }
+
+    root["schema"] = 1;
+    root["location"] = QString::fromLatin1(kDefaultLocationLabel);
+    root["latitude"] = latitude;
+    root["longitude"] = longitude;
+    root["max_age_seconds"] = kWeatherCacheMaxAgeSeconds;
+    root["days"] = days;
+
+    const QString tmp = path + ".tmp";
+    QFile out(tmp);
+    if (out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+        out.close();
+        QFile::remove(path);
+        QFile::rename(tmp, path);
+    }
 }
 
 FinishService::WeatherDay FinishService::fetchWeather(const Context &context) const
@@ -198,6 +290,32 @@ FinishService::WeatherDay FinishService::fetchWeather(const Context &context) co
     const QString tz = qEnvironmentVariableIsSet("T14FINISH_TIMEZONE")
         ? qEnvironmentVariable("T14FINISH_TIMEZONE") : QString::fromLatin1(kDefaultTimeZone);
 
+    const WeatherDay cached = readWeatherCache(context.date, kWeatherCacheMaxAgeSeconds);
+    if (cached.known) {
+        recordBatteryActivity("cache_read");
+        return cached;
+    }
+
+    const int battery = batteryPercent();
+    const QString weatherPolicy = batteryFeaturePolicy("weather_network");
+    if (battery >= 0 && battery < kMinimumBatteryPercent
+        && (weatherPolicy == "BLOCK" || weatherPolicy == "MINIMIZE")) {
+        // When learning says network weather is costly, prefer a stale forecast over
+        // another network request. MINIMIZE allows up to 24 hours; BLOCK uses the
+        // same stale-cache fallback and avoids network entirely.
+        WeatherDay stale = readWeatherCache(context.date, 24 * 60 * 60);
+        if (stale.known) {
+            stale.source += QString(" [low-battery %1 policy]").arg(weatherPolicy.toLower());
+            recordBatteryActivity("cache_read");
+            return stale;
+        }
+        if (weatherPolicy == "BLOCK") {
+            out.error = "weather network refresh blocked by learned low-battery policy and no usable cached forecast exists";
+            return out;
+        }
+    }
+
+    recordBatteryActivity("weather_network");
     QUrl url("https://api.open-meteo.com/v1/forecast");
     QUrlQuery query;
     query.addQueryItem("latitude", QString::number(lat, 'f', 4));
@@ -205,7 +323,7 @@ FinishService::WeatherDay FinishService::fetchWeather(const Context &context) co
     query.addQueryItem("daily", "rain_sum,precipitation_probability_max");
     query.addQueryItem("timezone", tz);
     query.addQueryItem("start_date", context.date.toString(Qt::ISODate));
-    query.addQueryItem("end_date", context.date.toString(Qt::ISODate));
+    query.addQueryItem("end_date", context.date.addDays(15).toString(Qt::ISODate));
     url.setQuery(query);
 
     QNetworkAccessManager manager;
@@ -241,22 +359,107 @@ FinishService::WeatherDay FinishService::fetchWeather(const Context &context) co
     }
 
     const QJsonObject daily = doc.object().value("daily").toObject();
+    const QJsonArray dates = daily.value("time").toArray();
     const QJsonArray rain = daily.value("rain_sum").toArray();
     const QJsonArray prob = daily.value("precipitation_probability_max").toArray();
-    if (rain.isEmpty() && prob.isEmpty()) {
+    if (dates.isEmpty() || (rain.isEmpty() && prob.isEmpty())) {
         out.error = "weather service did not return rain data for the requested date";
         return out;
     }
 
-    out.rainMm = rain.isEmpty() ? 0.0 : rain.at(0).toDouble();
-    out.precipitationProbability = prob.isEmpty() ? 0 : prob.at(0).toInt();
-    out.rainy = out.rainMm > 0.0 || out.precipitationProbability >= 50;
-    out.known = true;
-    out.source = QStringLiteral("Open-Meteo forecast for %1 (%2,%3)")
+    const QString source = QStringLiteral("Open-Meteo forecast for %1 (%2,%3)")
         .arg(QString::fromLatin1(kDefaultLocationLabel))
         .arg(lat, 0, 'f', 4)
         .arg(lon, 0, 'f', 4);
+    writeWeatherCache(daily, lat, lon, source);
+    recordBatteryActivity("weather_network");
+
+    const QString wanted = context.date.toString(Qt::ISODate);
+    for (int i = 0; i < dates.size(); ++i) {
+        if (dates.at(i).toString() != wanted)
+            continue;
+        out.rainMm = i < rain.size() ? rain.at(i).toDouble() : 0.0;
+        out.precipitationProbability = i < prob.size() ? prob.at(i).toInt() : 0;
+        out.rainy = out.rainMm > 0.0 || out.precipitationProbability >= 50;
+        out.known = true;
+        out.source = source;
+        return out;
+    }
+
+    out.error = "weather service did not include the requested date";
     return out;
+}
+
+void FinishService::ensureSunsetCache(const QDate &anchorDate, double latitude, double longitude) const
+{
+    QDir().mkpath(cacheDirectory());
+    const QString path = cacheDirectory() + "/sunset-365.json";
+
+    QJsonObject existingRoot;
+    QFile existing(path);
+    if (existing.open(QIODevice::ReadOnly)) {
+        QJsonParseError pe;
+        const QJsonDocument doc = QJsonDocument::fromJson(existing.readAll(), &pe);
+        if (pe.error == QJsonParseError::NoError && doc.isObject())
+            existingRoot = doc.object();
+    }
+
+    const QJsonObject existingDays = existingRoot.value("days").toObject();
+    const QDate lastWanted = anchorDate.addDays(kSunsetCacheDays - 1);
+    if (existingDays.contains(anchorDate.toString(Qt::ISODate)) &&
+        existingDays.contains(lastWanted.toString(Qt::ISODate)))
+        return;
+
+    QJsonObject days = existingDays;
+    for (int i = 0; i < kSunsetCacheDays; ++i) {
+        const QDate d = anchorDate.addDays(i);
+        QString err;
+        const QTime t = localSunset(d, latitude, longitude, &err);
+        if (!t.isValid())
+            continue;
+        QJsonObject entry;
+        entry["sunset"] = t.toString("HH:mm:ss");
+        entry["source"] = "local astronomical calculation";
+        days[d.toString(Qt::ISODate)] = entry;
+    }
+
+    QJsonObject root;
+    root["schema"] = 1;
+    root["generated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+    root["start_date"] = anchorDate.toString(Qt::ISODate);
+    root["days_cached"] = kSunsetCacheDays;
+    root["location"] = QString::fromLatin1(kDefaultLocationLabel);
+    root["latitude"] = latitude;
+    root["longitude"] = longitude;
+    root["days"] = days;
+
+    const QString tmp = path + ".tmp";
+    QFile out(tmp);
+    if (out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+        out.close();
+        QFile::remove(path);
+        QFile::rename(tmp, path);
+    }
+}
+
+QTime FinishService::cachedSunset(const QDate &date, double latitude, double longitude, QString *error) const
+{
+    ensureSunsetCache(date, latitude, longitude);
+    QFile f(cacheDirectory() + "/sunset-365.json");
+    if (f.open(QIODevice::ReadOnly)) {
+        QJsonParseError pe;
+        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+        if (pe.error == QJsonParseError::NoError && doc.isObject()) {
+            const QJsonObject days = doc.object().value("days").toObject();
+            const QJsonObject entry = days.value(date.toString(Qt::ISODate)).toObject();
+            const QTime t = QTime::fromString(entry.value("sunset").toString(), "HH:mm:ss");
+            if (t.isValid())
+                return t;
+        }
+    }
+
+    return localSunset(date, latitude, longitude, error);
 }
 
 QTime FinishService::localSunset(const QDate &date, double latitude, double longitude, QString *error) const
@@ -402,7 +605,7 @@ FinishService::Decision FinishService::makeDecision(const Context &context) cons
     const double lon = lonOk ? configuredLon : kDefaultLongitude;
 
     QString sunsetError;
-    d.sunset = localSunset(context.date, lat, lon, &sunsetError);
+    d.sunset = cachedSunset(context.date, lat, lon, &sunsetError);
     if (!d.sunset.isValid()) {
         d.state = "ERROR";
         d.reason = "unable to calculate sunset: " + sunsetError;
@@ -492,6 +695,9 @@ QString FinishService::codingStateResponse(const Context &context, bool asJson) 
     o["state"] = d.state;
     o["date"] = context.date.toString(Qt::ISODate);
     o["battery_percent"] = safety.batteryPercent;
+    o["low_battery_threshold_percent"] = kMinimumBatteryPercent;
+    o["low_battery_mode"] = safety.batteryPercent >= 0 && safety.batteryPercent < kMinimumBatteryPercent;
+    o["weather_network_policy"] = batteryFeaturePolicy("weather_network");
     o["free_gib"] = double(safety.freeBytes) / (1024.0 * 1024.0 * 1024.0);
     o["location"] = context.locationLabel.isEmpty()
         ? QString::fromLatin1(kDefaultLocationLabel)
@@ -520,9 +726,39 @@ QString FinishService::codingStateResponse(const Context &context, bool asJson) 
     else if (d.state == "FINISH_CODING")
         o["next_action"] = "Stop adding features. Compile, test, debug, document, and save.";
     else if (d.state == "STOP_SAFETY")
-        o["next_action"] = "Stop writes until the battery and disk safety requirements pass.";
+        o["next_action"] = "Stop writes because the disk-space safety requirement failed.";
 
     return compactJson(o);
+}
+
+QString FinishService::batteryFeaturePolicy(const QString &feature) const
+{
+    if (feature == "cache_read" || feature == "local_compute" || feature == "deadline" || feature == "coding_state")
+        return "ALLOW";
+
+    const QString helper = QStandardPaths::findExecutable("t14finish-battery-monitor");
+    if (helper.isEmpty())
+        return "ALLOW";
+
+    QProcess p;
+    p.start(helper, QStringList() << "policy" << feature);
+    if (!p.waitForFinished(2500)) {
+        p.kill();
+        return "ALLOW";
+    }
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(p.readAllStandardOutput(), &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject())
+        return "ALLOW";
+    return doc.object().value("policy").toString("ALLOW").toUpper();
+}
+
+void FinishService::recordBatteryActivity(const QString &category) const
+{
+    const QString helper = QStandardPaths::findExecutable("t14finish-battery-monitor");
+    if (helper.isEmpty())
+        return;
+    QProcess::startDetached(helper, QStringList() << "sample" << category);
 }
 
 QString FinishService::compactJson(const QJsonObject &obj) const
@@ -553,7 +789,7 @@ QString FinishService::handleCommand(const QString &rawCommand)
         o["reason"] = safety.reason;
         o["battery_percent"] = safety.batteryPercent;
         o["free_gib"] = double(safety.freeBytes) / (1024.0 * 1024.0 * 1024.0);
-        o["next_action"] = "Stop writes until the battery and disk safety requirements pass.";
+        o["next_action"] = "Stop writes because the disk-space safety requirement failed.";
         return compactJson(o);
     }
 
@@ -573,6 +809,17 @@ QString FinishService::handleCommand(const QString &rawCommand)
         || command.compare("coding-state-json", Qt::CaseInsensitive) == 0)
         return codingStateResponse(context, true);
 
+    if (command.compare("battery-policy --json", Qt::CaseInsensitive) == 0
+        || command.compare("battery-policy-json", Qt::CaseInsensitive) == 0) {
+        const QString helper = QStandardPaths::findExecutable("t14finish-battery-monitor");
+        if (helper.isEmpty())
+            return "{\"error\":\"battery monitor helper not installed\"}";
+        QProcess p;
+        p.start(helper, QStringList() << "report");
+        if (!p.waitForFinished(3000)) { p.kill(); return "{\"error\":\"battery monitor timed out\"}"; }
+        return QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+    }
+
     if (command.compare("status", Qt::CaseInsensitive) == 0) {
         QJsonObject o;
         o["project_id"] = QString::fromLatin1(kProjectId);
@@ -588,13 +835,19 @@ QString FinishService::handleCommand(const QString &rawCommand)
             o["time_display"] = context.timeDisplay;
         o["free_gib"] = double(safety.freeBytes) / (1024.0 * 1024.0 * 1024.0);
         o["battery_percent"] = safety.batteryPercent;
+        o["low_battery_threshold_percent"] = kMinimumBatteryPercent;
+        o["low_battery_mode"] = safety.batteryPercent >= 0 && safety.batteryPercent < kMinimumBatteryPercent;
+        o["weather_network_policy"] = batteryFeaturePolicy("weather_network");
+        o["git_backup_policy"] = batteryFeaturePolicy("git_backup");
+        o["version_check_policy"] = batteryFeaturePolicy("version_check");
         o["codes"] = QString::fromLatin1(kCodes);
-        o["sunset_mode"] = "local astronomical calculation";
+        o["sunset_mode"] = "365-day local cache; astronomical calculation on cache miss";
+        o["weather_cache"] = "fresh cached forecast first; Internet on cache miss/stale entry";
         o["weather_area"] = QString::fromLatin1(kDefaultLocationLabel);
         return compactJson(o);
     }
 
-    return "ERROR: commands are ping, status, deadline, coding-state, coding-state --json, codes";
+    return "ERROR: commands are ping, status, deadline, coding-state, coding-state --json, battery-policy --json, codes";
 }
 
 void FinishService::attemptTgRegistrationOnce()

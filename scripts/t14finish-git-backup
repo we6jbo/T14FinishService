@@ -8,7 +8,6 @@ REMOTE_URL="https://github.com/we6jbo/T14FinishService.git"
 BRANCH="master"
 MIN_SECONDS=2400
 MIN_FREE_KIB=$((10 * 1024 * 1024))
-MIN_BATTERY=55
 
 mkdir -p "$STATE_DIR"
 
@@ -23,7 +22,14 @@ for cap in /sys/class/power_supply/BAT*/capacity; do
     battery=$(tr -dc '0-9' < "$cap")
     [[ -n "$battery" ]] && break
 done
-if [[ -z "$battery" || "$battery" -lt "$MIN_BATTERY" ]]; then
+
+# Revision 7: below 55% is no longer an automatic stop. Defer this network/disk
+# feature only when accumulated T14 telemetry has learned that it is costly.
+policy="ALLOW"
+if command -v t14finish-battery-monitor >/dev/null 2>&1; then
+    policy=$(t14finish-battery-monitor policy git_backup 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("policy","ALLOW"))' 2>/dev/null || echo ALLOW)
+fi
+if [[ "$policy" == "BLOCK" || "$policy" == "MINIMIZE" ]]; then
     exit 0
 fi
 
@@ -61,7 +67,7 @@ data.update({
     "current_epoch": int(now_epoch),
     "last_push_epoch": int(last_push),
     "push_due": due.lower() == "true",
-    "battery_percent": int(battery),
+    "battery_percent": int(battery) if battery.isdigit() else None,
     "free_kib": int(free_kib),
     "minimum_push_interval_seconds": 2400
 })
@@ -75,6 +81,7 @@ PY
 
 [[ "$due" == true ]] || exit 0
 cd "$PROJECT"
+command -v t14finish-battery-monitor >/dev/null 2>&1 && t14finish-battery-monitor sample git_backup >/dev/null 2>&1 || true
 
 if [[ ! -d .git ]]; then
     git init -b "$BRANCH"
@@ -103,8 +110,10 @@ FILES=(
   main.cpp mainwindow.cpp mainwindow.h mainwindow.ui
   service_main.cpp finishservice.cpp finishservice.h
   tg_context_snapshot.json README.md 3751.txt
-  scripts/t14-finish scripts/t14finish-git-backup
+  scripts/t14-finish scripts/t14finish-git-backup scripts/t14finish-version-check scripts/t14finish-battery-monitor
   systemd/t14-finish-service.service systemd/t14finish-git-backup.service systemd/t14finish-git-backup.timer
+  systemd/t14finish-version-check.service systemd/t14finish-version-check.timer
+  systemd/t14finish-battery-monitor.service systemd/t14finish-battery-monitor.timer
   install.sh
 )
 for f in "${FILES[@]}"; do
@@ -117,6 +126,7 @@ fi
 
 git push -u origin "$BRANCH"
 
+command -v t14finish-battery-monitor >/dev/null 2>&1 && t14finish-battery-monitor sample git_backup >/dev/null 2>&1 || true
 touch "$FIRST_MARKER"
 new_push_epoch=$(date +%s)
 new_push_iso=$(date --iso-8601=seconds)

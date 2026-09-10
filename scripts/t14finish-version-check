@@ -5,7 +5,6 @@ STATE_DIR="${HOME}/.T14FinishService_backup"
 STATUS="${STATE_DIR}/status.json"
 URL="https://j03.page/t14finishservice/"
 SECONDS_PER_WEEK=604800
-MIN_BATTERY=55
 MIN_FREE_KIB=$((10 * 1024 * 1024))
 
 battery_percent() {
@@ -25,14 +24,16 @@ if [[ ! "$free_kib" =~ ^[0-9]+$ ]] || (( free_kib < MIN_FREE_KIB )); then
     exit 0
 fi
 
-# Safety gate 2: battery. Do not create/write state if this fails.
+# Revision 7 adaptive battery policy. A low battery alone does not disable this
+# feature. It is deferred only after telemetry learns that version checking causes
+# more-than-normal drain on this T14.
 battery=$(battery_percent || true)
-if [[ ! "$battery" =~ ^[0-9]+$ ]] || (( battery < MIN_BATTERY )); then
-    if [[ "$battery" =~ ^[0-9]+$ ]]; then
-        echo "T14FinishService version check skipped: battery is ${battery}%; at least 55% is required."
-    else
-        echo "T14FinishService version check skipped: battery percentage could not be read."
-    fi
+policy="ALLOW"
+if command -v t14finish-battery-monitor >/dev/null 2>&1; then
+    policy=$(t14finish-battery-monitor policy version_check 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("policy","ALLOW"))' 2>/dev/null || echo ALLOW)
+fi
+if [[ "$policy" == "BLOCK" || "$policy" == "MINIMIZE" ]]; then
+    echo "T14FinishService version check deferred by learned low-battery policy (${policy})."
     exit 0
 fi
 
@@ -66,7 +67,7 @@ if (( ! force && last_attempt > 0 && now_epoch - last_attempt < SECONDS_PER_WEEK
 fi
 
 # Record the attempt before network access so a failed request does not cause repeated
-# website hits during the same week. This write is allowed because both safety gates passed.
+# website hits during the same week. This write is allowed because the disk-space safety gate passed and the adaptive battery policy allowed the check.
 python3 - "$STATUS" "$now_iso" "$now_epoch" "$URL" <<'PY'
 import json,sys,os,tempfile
 path,iso,epoch,url=sys.argv[1:]
@@ -91,6 +92,7 @@ with os.fdopen(fd,'w',encoding='utf-8') as f:
 os.replace(tmp,path)
 PY
 
+command -v t14finish-battery-monitor >/dev/null 2>&1 && t14finish-battery-monitor sample version_check >/dev/null 2>&1 || true
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 if ! curl -fsSL --max-time 20 --connect-timeout 10 -A 'T14FinishService/0.5 weekly-version-check' "$URL" -o "$tmp"; then
@@ -107,6 +109,8 @@ else
     message="No Version 2.0 update marker was found."
     found=false
 fi
+
+command -v t14finish-battery-monitor >/dev/null 2>&1 && t14finish-battery-monitor sample version_check >/dev/null 2>&1 || true
 
 # Save only small result metadata, never the downloaded page.
 python3 - "$STATUS" "$now_iso" "$found" "$message" <<'PY'
