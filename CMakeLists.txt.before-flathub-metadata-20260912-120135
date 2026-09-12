@@ -39,11 +39,3 @@ target_link_libraries(T14FinishService PRIVATE
 install(TARGETS T14FinishService
     RUNTIME DESTINATION bin
 )
-
-# Flathub desktop integration
-install(FILES org.oneal.T14FinishService.desktop
-        DESTINATION share/applications)
-install(FILES org.oneal.T14FinishService.metainfo.xml
-        DESTINATION share/metainfo)
-install(FILES org.oneal.T14FinishService.svg
-        DESTINATION share/icons/hicolor/scalable/apps)
