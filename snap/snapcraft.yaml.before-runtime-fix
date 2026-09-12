@@ -21,8 +21,6 @@ apps:
   t14finishservice:
     command: usr/local/bin/T14FinishService
     daemon: simple
-    environment:
-      LD_LIBRARY_PATH: "$SNAP/usr/lib/x86_64-linux-gnu/libproxy:$SNAP/usr/lib/x86_64-linux-gnu:$SNAP/usr/lib:$LD_LIBRARY_PATH"
     plugs:
       - network
       - network-bind
@@ -41,5 +39,4 @@ parts:
     stage-packages:
       - libqt6core6t64
       - libqt6network6
-      - libproxy1v5
 icon: 'org.oneal.T14FinishService.svg'
