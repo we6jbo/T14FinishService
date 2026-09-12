@@ -29,7 +29,7 @@ namespace {
 constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
-constexpr int kPackageRevision = 10;
+constexpr int kPackageRevision = 12;
 constexpr const char *kProjectId = "t14-finish-service-v1";
 constexpr const char *kCodes = "TG564843,TG333041,TG323932,TG610982,TG148675";
 
@@ -44,6 +44,25 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr int kWeatherTimeoutMs = 10000;
 constexpr int kWeatherCacheMaxAgeSeconds = 6 * 60 * 60;
 constexpr int kSunsetCacheDays = 365;
+
+const QString kDefaultExternalTimingHelperNote = QStringLiteral(
+    "NOTE FOR CHATGPT/OTHER CODING ASSISTANTS: t14-finish and T14FinishService are not part of the project currently being developed. "
+    "They are external timing helpers used only to decide when feature work should stop. Do not add t14-finish, T14FinishService, "
+    "or their files/code to the current project's source, ZIP/package, build system, documentation, or repository unless the user explicitly asks you to do so.");
+
+static QString externalTimingHelperNote()
+{
+    const QString configHome = qEnvironmentVariable("XDG_CONFIG_HOME").isEmpty()
+        ? QDir::homePath() + "/.config"
+        : qEnvironmentVariable("XDG_CONFIG_HOME");
+    QFile file(configHome + "/t14finishservice/motd.txt");
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString configured = QString::fromUtf8(file.readAll()).trimmed();
+        if (!configured.isEmpty())
+            return configured;
+    }
+    return kDefaultExternalTimingHelperNote;
+}
 
 static double normalizeDegrees(double value)
 {
@@ -704,16 +723,20 @@ FinishService::Decision FinishService::makeDecision(const Context &context) cons
 
 QString FinishService::deadlineResponse(const Context &context, int warningMinutes) const
 {
+    const auto withHelperNote = [](const QString &message) {
+        return message + "\n" + externalTimingHelperNote();
+    };
+
     const Decision d = makeDecision(context);
     if (d.state == "STOP_SAFETY")
-        return "STOP: " + d.reason + ".";
+        return withHelperNote("STOP: " + d.reason + ".");
     if (d.state == "TIME_HIDDEN")
-        return "TIME_HIDDEN: " + d.reason + ".";
+        return withHelperNote("TIME_HIDDEN: " + d.reason + ".");
     if (!d.ok)
-        return "ERROR: " + d.reason;
+        return withHelperNote("ERROR: " + d.reason);
     if (d.state == "AFTER_HOURS")
-        return QString("The time is %1. It is 8:00 PM or later, so T14FinishService will not set another coding deadline tonight. Check again tomorrow for the next deadline.")
-            .arg(d.currentDisplay);
+        return withHelperNote(QString("The time is %1. It is 8:00 PM or later, so T14FinishService will not set another coding deadline tonight. Check again tomorrow for the next deadline.")
+            .arg(d.currentDisplay));
 
     QString weatherText;
     if (d.rainKnown) {
@@ -729,26 +752,26 @@ QString FinishService::deadlineResponse(const Context &context, int warningMinut
     const bool warningActive = secondsUntilDeadline > 0 && secondsUntilDeadline <= warningMinutes * 60;
 
     if (d.state == "FINISH_CODING") {
-        return QString("The time is %1. We cannot add any more features after %2. The cutoff has been reached, so stop adding features now. Compile, test, debug, document, and save the work that already exists. Rule: %3. San Carlos sunset: %4. %5.")
+        return withHelperNote(QString("The time is %1. We cannot add any more features after %2. The cutoff has been reached, so stop adding features now. Compile, test, debug, document, and save the work that already exists. Rule: %3. San Carlos sunset: %4. %5.")
             .arg(d.currentDisplay,
                  deadlineText,
                  d.reason,
                  d.sunset.toString("h:mm AP"),
-                 weatherText);
+                 weatherText));
     }
 
     if (!warningActive) {
-        return QString("The time is %1. No finish-up warning is needed yet. T14FinishService will display the stop-coding warning when the cutoff is within %2 minutes. For unusually long work, ChatGPT may request an earlier warning with 't14-finish deadline --warning-minutes N', where N must be from 90 through 420; this changes only when the warning appears, never the actual stop time.")
+        return withHelperNote(QString("The time is %1. No finish-up warning is needed yet. T14FinishService will display the stop-coding warning when the cutoff is within %2 minutes. For unusually long work, ChatGPT may request an earlier warning with 't14-finish deadline --warning-minutes N', where N must be from 90 through 420; this changes only when the warning appears, never the actual stop time.")
             .arg(d.currentDisplay)
-            .arg(warningMinutes);
+            .arg(warningMinutes));
     }
 
-    return QString("The time is %1. Warning: we cannot add any more features after %2. Once it becomes %2, we have to stop adding features and switch to compiling, testing, debugging, documenting, and saving. Rule: %3. San Carlos sunset: %4. %5. If the current task is unusually long, ChatGPT may choose an earlier warning by running 't14-finish deadline --warning-minutes N', where N is 90 through 420 minutes; that changes only the warning lead time, not the %2 stop time.")
+    return withHelperNote(QString("The time is %1. Warning: we cannot add any more features after %2. Once it becomes %2, we have to stop adding features and switch to compiling, testing, debugging, documenting, and saving. Rule: %3. San Carlos sunset: %4. %5. If the current task is unusually long, ChatGPT may choose an earlier warning by running 't14-finish deadline --warning-minutes N', where N is 90 through 420 minutes; that changes only the warning lead time, not the %2 stop time.")
         .arg(d.currentDisplay,
              deadlineText,
              d.reason,
              d.sunset.toString("h:mm AP"),
-             weatherText);
+             weatherText));
 }
 
 QString FinishService::codingStateResponse(const Context &context, bool asJson) const

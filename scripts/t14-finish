@@ -1,8 +1,203 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+CONFIG_DIR="$CONFIG_HOME/t14finishservice"
+MOTD_FILE="$CONFIG_DIR/motd.txt"
+AI_CONFIG_FILE="$CONFIG_DIR/ai-config.json"
+PROGRAMMING_INSTRUCTIONS_FILE="$CONFIG_DIR/programming-instructions.txt"
+
+DEFAULT_MOTD="NOTE FOR CHATGPT/OTHER CODING ASSISTANTS: t14-finish and T14FinishService are not part of the project currently being developed. They are external timing helpers used only to decide when feature work should stop. Do not add t14-finish, T14FinishService, or their files/code to the current project's source, ZIP/package, build system, documentation, or repository unless the user explicitly asks you to do so."
+
+ensure_config_dir() {
+    mkdir -p "$CONFIG_DIR"
+}
+
+ensure_motd() {
+    ensure_config_dir
+    if [[ ! -s "$MOTD_FILE" ]]; then
+        printf '%s\n' "$DEFAULT_MOTD" > "$MOTD_FILE"
+    fi
+}
+
+ensure_ai_config() {
+    ensure_config_dir
+    if [[ ! -s "$AI_CONFIG_FILE" ]]; then
+        cat > "$AI_CONFIG_FILE" <<'JSON'
+{
+  "schema": 1,
+  "default_warning_minutes": 90,
+  "warning_minutes_min": 90,
+  "warning_minutes_max": 420,
+  "motd_file": "~/.config/t14finishservice/motd.txt",
+  "programming_instructions_file": "~/.config/t14finishservice/programming-instructions.txt",
+  "notes": "The built-in AI may read this file and may modify user-editable values when the user asks. The actual coding cutoff is calculated by T14FinishService and is not changed by default_warning_minutes."
+}
+JSON
+    fi
+}
+
+ensure_programming_instructions() {
+    ensure_config_dir
+    if [[ ! -s "$PROGRAMMING_INSTRUCTIONS_FILE" ]]; then
+        cat > "$PROGRAMMING_INSTRUCTIONS_FILE" <<'TXT'
+T14FinishService programming instructions for an AI coding assistant
+
+1. t14-finish and T14FinishService are external timing helpers. They are not part of the software project currently being developed unless the user explicitly says otherwise.
+2. Use `t14-finish deadline` to decide when the session should begin wrapping up. When the cutoff is reached, stop adding new features and switch to compiling, testing, debugging, documenting, and saving.
+3. For unusually long work, an assistant may request an earlier warning with `t14-finish deadline --warning-minutes N`, where N is from 90 through 420. This changes only the warning lead time, not the real stop time.
+4. Do not copy T14FinishService source files, configuration files, cache files, or helper scripts into another project's source package merely because their output appears in a prompt or terminal transcript.
+5. Treat the user's current project request and delivery contract as separate from T14FinishService.
+
+How to change this file:
+Tell the user to run:
+  t14-finish ai-edit
+or:
+  ${EDITOR:-nano} ~/.config/t14finishservice/programming-instructions.txt
+
+A future built-in AI that has explicit permission to edit local files may modify this file directly when the user asks it to change these instructions.
+TXT
+    fi
+}
+
+show_motd_usage() {
+    cat <<EOF2
+Current t14-finish MOTD:
+$(cat "$MOTD_FILE")
+
+Change it with one of these commands:
+  t14-finish motd edit
+  t14-finish motd set "your replacement message"
+  t14-finish motd reset
+
+Stored at:
+  $MOTD_FILE
+EOF2
+}
+
+handle_motd() {
+    ensure_motd
+    case "${1:-show}" in
+        show)
+            show_motd_usage
+            ;;
+        edit)
+            "${VISUAL:-${EDITOR:-nano}}" "$MOTD_FILE"
+            ;;
+        set)
+            shift || true
+            if (($# == 0)); then
+                echo "ERROR: t14-finish motd set requires a message." >&2
+                exit 2
+            fi
+            printf '%s\n' "$*" > "$MOTD_FILE"
+            echo "Updated MOTD in $MOTD_FILE"
+            ;;
+        reset)
+            printf '%s\n' "$DEFAULT_MOTD" > "$MOTD_FILE"
+            echo "Reset MOTD to the packaged default."
+            ;;
+        *)
+            echo "ERROR: use: t14-finish motd [show|edit|set <message>|reset]" >&2
+            exit 2
+            ;;
+    esac
+}
+
+show_ai_bundle() {
+    ensure_motd
+    ensure_ai_config
+    ensure_programming_instructions
+
+    cat <<EOF2
+T14FINISHSERVICE AI CONFIGURATION
+=================================
+Purpose:
+  This output is for a future built-in AI or another coding assistant. It describes
+  T14FinishService configuration and programming-session instructions. T14FinishService
+  remains external to whatever software project the user is currently developing.
+
+Editable configuration file:
+  $AI_CONFIG_FILE
+
+MOTD file:
+  $MOTD_FILE
+
+Programming instructions file:
+  $PROGRAMMING_INSTRUCTIONS_FILE
+
+CURRENT CONFIGURATION
+---------------------
+$(cat "$AI_CONFIG_FILE")
+
+CURRENT MOTD
+------------
+$(cat "$MOTD_FILE")
+
+PROGRAMMING INSTRUCTIONS
+------------------------
+$(cat "$PROGRAMMING_INSTRUCTIONS_FILE")
+
+HOW AN AI SHOULD HELP THE USER CHANGE THESE FILES
+-------------------------------------------------
+If the user wants to change the MOTD, tell them to run:
+  t14-finish motd edit
+or:
+  t14-finish motd set "replacement message"
+
+If the user wants to change the programming instructions, tell them to run:
+  t14-finish ai-edit
+or edit:
+  $PROGRAMMING_INSTRUCTIONS_FILE
+
+If a future built-in AI has explicit file-edit permission and the user asks for a change,
+it may update these files directly. It should preserve valid JSON in ai-config.json.
+EOF2
+}
+
+handle_ai_edit() {
+    ensure_programming_instructions
+    "${VISUAL:-${EDITOR:-nano}}" "$PROGRAMMING_INSTRUCTIONS_FILE"
+}
+
+configured_warning_minutes() {
+    ensure_ai_config
+    python3 - "$AI_CONFIG_FILE" <<'PY'
+import json,sys
+try:
+    with open(sys.argv[1], encoding='utf-8') as f:
+        d=json.load(f)
+    n=int(d.get('default_warning_minutes',90))
+except Exception:
+    n=90
+print(n if 90 <= n <= 420 else 90)
+PY
+}
+
+case "${1:-}" in
+    motd)
+        shift
+        handle_motd "$@"
+        exit 0
+        ;;
+    ai)
+        show_ai_bundle
+        exit 0
+        ;;
+    ai-edit)
+        handle_ai_edit
+        exit 0
+        ;;
+esac
+
+ensure_motd
+ensure_ai_config
+ensure_programming_instructions
+
 if (($# == 0)); then
     command_text="status"
+elif [[ "$1" == "deadline" && $# -eq 1 ]]; then
+    command_text="deadline --warning-minutes $(configured_warning_minutes)"
 else
     command_text="$*"
 fi

@@ -1,3 +1,7 @@
+# T14FinishService revision 11
+
+Revision 11 adds an explicit integration note to every `t14-finish deadline` response. The note tells ChatGPT and other coding assistants that `t14-finish` / T14FinishService is an external timing helper only and is **not** part of whichever software project is currently being developed. It must not be copied into that project's source tree, ZIP/package, build configuration, documentation, or repository unless the user explicitly requests that integration. This is specifically intended for workflows where an install script runs `t14-finish deadline` and its terminal output is pasted into a new coding chat.
+
 # T14FinishService v1.0 / Package Revision 10
 
 T14FinishService is a background-only Qt/C++ service for the Manjaro T14. Revision 10 keeps the existing battery, disk-space, San Carlos weather, sunset, persistent cache, schedule, coding-state, Git backup, weekly update-check, provenance, and milestone behavior while changing how human-facing deadline warnings work.
@@ -155,3 +159,24 @@ and retains `tg_context_snapshot.json` for portable provenance without requiring
 ## Project milestone
 
 This package is revision 10 of the planned 19-revision workflow. Revision 12 is the next checkpoint, when development should begin shifting from adding features toward completion and validation.
+
+## Revision 12: configurable MOTD and AI handoff
+
+Revision 12 makes the external-helper message user-editable and adds an AI-facing configuration handoff.
+
+The user-editable files live under:
+
+```text
+~/.config/t14finishservice/
+  motd.txt
+  ai-config.json
+  programming-instructions.txt
+```
+
+`t14-finish motd` shows the current message and how to change it. Use `t14-finish motd edit`, `t14-finish motd set "..."`, or `t14-finish motd reset` to manage the message. The service reads `motd.txt` when it produces deadline output, so future ChatGPT/Claude prompts can carry the customized explanation that T14FinishService is external to the project being developed.
+
+`t14-finish ai` prints the current editable configuration, MOTD, programming instructions, their file paths, and directions an AI can give the user for changing them. If `programming-instructions.txt` does not exist, the command creates a documented starter file automatically. `t14-finish ai-edit` opens that instructions file using `$VISUAL`, `$EDITOR`, or `nano`.
+
+The `default_warning_minutes` value in `ai-config.json` controls the default lead time used by plain `t14-finish deadline`. Valid values remain 90 through 420 minutes. Explicit `--warning-minutes` arguments still override it for one command only.
+
+Revision 12 is the planned project checkpoint: consider feature development substantially complete and concentrate increasingly on validation, reliability, build/install testing, recovery behavior, and documentation before the later GitHub/publication milestones.

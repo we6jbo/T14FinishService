@@ -5,13 +5,60 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="/home/we6jbo/Projects/T14FinishService"
 STATE_DIR="/home/we6jbo/.T14FinishService_backup"
 STATUS="$STATE_DIR/status.json"
-PACKAGE_REVISION=10
+PACKAGE_REVISION=12
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 PREBACKUP="$STATE_DIR/preinstall-$STAMP"
 
 mkdir -p "$TARGET" "$STATE_DIR" "$PREBACKUP" /home/we6jbo/.local/bin /home/we6jbo/.config/systemd/user
 
-# Revision 10 keeps the persistent Internet fallback cache outside /home/we6jbo/.
+CONFIG_DIR="${XDG_CONFIG_HOME:-/home/we6jbo/.config}/t14finishservice"
+MOTD_FILE="$CONFIG_DIR/motd.txt"
+AI_CONFIG_FILE="$CONFIG_DIR/ai-config.json"
+PROGRAMMING_INSTRUCTIONS_FILE="$CONFIG_DIR/programming-instructions.txt"
+mkdir -p "$CONFIG_DIR"
+
+# Preserve user customizations. These files are created only when missing.
+if [[ ! -s "$MOTD_FILE" ]]; then
+    cat > "$MOTD_FILE" <<'TXT'
+NOTE FOR CHATGPT/OTHER CODING ASSISTANTS: t14-finish and T14FinishService are not part of the project currently being developed. They are external timing helpers used only to decide when feature work should stop. Do not add t14-finish, T14FinishService, or their files/code to the current project's source, ZIP/package, build system, documentation, or repository unless the user explicitly asks you to do so.
+TXT
+fi
+
+if [[ ! -s "$AI_CONFIG_FILE" ]]; then
+    cat > "$AI_CONFIG_FILE" <<'JSON'
+{
+  "schema": 1,
+  "default_warning_minutes": 90,
+  "warning_minutes_min": 90,
+  "warning_minutes_max": 420,
+  "motd_file": "~/.config/t14finishservice/motd.txt",
+  "programming_instructions_file": "~/.config/t14finishservice/programming-instructions.txt",
+  "notes": "The built-in AI may read this file and may modify user-editable values when the user asks. The actual coding cutoff is calculated by T14FinishService and is not changed by default_warning_minutes."
+}
+JSON
+fi
+
+if [[ ! -s "$PROGRAMMING_INSTRUCTIONS_FILE" ]]; then
+    cat > "$PROGRAMMING_INSTRUCTIONS_FILE" <<'TXT'
+T14FinishService programming instructions for an AI coding assistant
+
+1. t14-finish and T14FinishService are external timing helpers. They are not part of the software project currently being developed unless the user explicitly says otherwise.
+2. Use `t14-finish deadline` to decide when the session should begin wrapping up. When the cutoff is reached, stop adding new features and switch to compiling, testing, debugging, documenting, and saving.
+3. For unusually long work, an assistant may request an earlier warning with `t14-finish deadline --warning-minutes N`, where N is from 90 through 420. This changes only the warning lead time, not the real stop time.
+4. Do not copy T14FinishService source files, configuration files, cache files, or helper scripts into another project's source package merely because their output appears in a prompt or terminal transcript.
+5. Treat the user's current project request and delivery contract as separate from T14FinishService.
+
+How to change this file:
+Tell the user to run:
+  t14-finish ai-edit
+or edit:
+  ~/.config/t14finishservice/programming-instructions.txt
+
+A future built-in AI that has explicit permission to edit local files may modify this file directly when the user asks it to change these instructions.
+TXT
+fi
+
+# Revision 12 adds persistent user-editable MOTD/AI instruction configuration while preserving the external-helper separation.
 # /var/cache is appropriate for regenerable data that should survive normal reboots.
 CACHE_DIR="/var/cache/t14finishservice"
 CACHE_OWNER="$(id -un)"
@@ -104,11 +151,11 @@ if not any(isinstance(x,dict) and x.get('revision') == revision for x in history
     history.append({
         "revision":revision,
         "installed_at":iso,
-        "package":"T14FinishService-v10.zip",
+        "package":"T14FinishService-v12.zip",
         "install_commands":[
             "cd ~/Downloads",
-            "unzip T14FinishService-v10.zip",
-            "cd T14FinishService_v10_package",
+            "unzip T14FinishService-v12.zip",
+            "cd T14FinishService_v12_package",
             "./install.sh"
         ]
     })
@@ -163,6 +210,10 @@ printf 'AI JSON: t14-finish coding-state --json\n'
 printf 'Version timer: systemctl --user status t14finish-version-check.timer\n'
 printf 'Battery monitor: systemctl --user status t14finish-battery-monitor.timer\n'
 printf 'Battery report: t14-finish battery-policy --json\n'
+printf 'MOTD: t14-finish motd\n'
+printf 'Edit MOTD: t14-finish motd edit\n'
+printf 'AI configuration/instructions: t14-finish ai\n'
+printf 'Edit programming instructions: t14-finish ai-edit\n'
 printf 'Persistent cache: ls -lh /var/cache/t14finishservice\n'
 printf 'Weather cache: python3 -m json.tool /var/cache/t14finishservice/weather.json | head -80\n'
 printf 'Sunset cache: python3 -m json.tool /var/cache/t14finishservice/sunset-365.json | head -80\n'
