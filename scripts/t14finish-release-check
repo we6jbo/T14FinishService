@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Read-only release-candidate validation for T14FinishService.
+# This script intentionally does not commit, push, install, delete, or modify source files.
+set -u
+
+ROOT="/home/we6jbo/Projects/T14FinishService"
+CACHE="/var/cache/t14finishservice"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/t14finishservice"
+fail=0
+warn=0
+
+pass(){ printf 'PASS: %s\n' "$*"; }
+warning(){ printf 'WARN: %s\n' "$*"; warn=$((warn+1)); }
+failmsg(){ printf 'FAIL: %s\n' "$*"; fail=$((fail+1)); }
+
+printf 'T14FinishService release-candidate validation\n'
+printf '=============================================\n'
+
+[[ -d "$ROOT" ]] && pass "project directory exists" || failmsg "missing $ROOT"
+
+required=(CMakeLists.txt service_main.cpp finishservice.cpp finishservice.h tg_context_snapshot.json README.md MAINTAINERS.md RELEASE_CHECKLIST.md 3751.txt 9579.txt)
+for f in "${required[@]}"; do
+  [[ -f "$ROOT/$f" ]] && pass "$f exists" || failmsg "$f is missing"
+done
+
+for code in TG564843 TG333041 TG323932 TG610982 TG148675; do
+  if grep -Rqs --exclude-dir=build --exclude='*.zip' "$code" "$ROOT" 2>/dev/null; then
+    pass "provenance code $code is represented in project source/metadata"
+  else
+    failmsg "provenance code $code was not found in project source/metadata"
+  fi
+done
+
+[[ -x "$HOME/.local/bin/t14-finish" ]] && pass "t14-finish client installed" || failmsg "t14-finish client missing"
+[[ -x "$HOME/.local/bin/t14finish-9579-check" ]] && pass "9579 checker installed" || warning "9579 checker not installed"
+[[ -d "$CACHE" ]] && pass "persistent cache directory exists outside home" || warning "cache directory $CACHE does not exist yet"
+[[ -f "$CONFIG/motd.txt" ]] && pass "MOTD exists" || warning "MOTD has not been created yet"
+[[ -f "$CONFIG/ai-config.json" ]] && pass "AI configuration exists" || warning "AI configuration has not been created yet"
+[[ -f "$CONFIG/programming-instructions.txt" ]] && pass "AI programming instructions exist" || warning "AI programming instructions have not been created yet"
+
+if systemctl --user is-active --quiet t14-finish-service.service 2>/dev/null; then
+  pass "systemd background service is active"
+else
+  warning "systemd background service is not active"
+fi
+
+if command -v t14-finish >/dev/null 2>&1 && [[ "$(t14-finish ping 2>/dev/null || true)" == "pong" ]]; then
+  pass "localhost client/service ping returned pong"
+else
+  warning "t14-finish ping did not return pong"
+fi
+
+BIN="$ROOT/build/Desktop_Debug/T14FinishService"
+[[ -x "$BIN" ]] && pass "Qt/CMake debug executable exists" || warning "debug executable not found at $BIN"
+
+if [[ -d "$ROOT/.git" ]]; then
+  pass "Git repository exists"
+  branch=$(git -C "$ROOT" branch --show-current 2>/dev/null || true)
+  [[ -n "$branch" ]] && pass "Git branch: $branch" || warning "could not determine Git branch"
+  if git -C "$ROOT" diff --check >/dev/null 2>&1; then
+    pass "git diff --check found no whitespace errors"
+  else
+    warning "git diff --check reports whitespace errors"
+  fi
+  if [[ -z "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]]; then
+    pass "Git working tree is clean"
+  else
+    warning "Git working tree has uncommitted/untracked changes (expected before release if intentional)"
+  fi
+else
+  warning "$ROOT is not currently a Git repository"
+fi
+
+printf '\nSummary: %d failure(s), %d warning(s).\n' "$fail" "$warn"
+if (( fail > 0 )); then
+  printf 'Release candidate is NOT ready. Resolve FAIL items first.\n'
+  exit 1
+fi
+printf 'No hard failures. Review WARN items before publication.\n'
+exit 0

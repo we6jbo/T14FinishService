@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#
+# T14FinishService 9579 publication-marker checker
+# -------------------------------------------------
+# This script DOES NOT modify Git or GitHub. It only verifies the local marker and,
+# when Internet access is available, checks the public GitHub master branch.
+# If the remote file or quote is missing, it prints a clear notice so the user can
+# decide when/how to add and push it.
+set -euo pipefail
+
+PROJECT_ROOT="${T14FINISH_PROJECT_ROOT:-/home/we6jbo/Projects/T14FinishService}"
+LOCAL_FILE="$PROJECT_ROOT/9579.txt"
+REMOTE_RAW="https://raw.githubusercontent.com/we6jbo/T14FinishService/master/9579.txt"
+EXPECTED_QUOTE="Mechanically they are more perfect than we are; they have an enormously developed intelligence, but they have no soul."
+
+local_ok=0
+if [[ -f "$LOCAL_FILE" ]] && grep -Fq "$EXPECTED_QUOTE" "$LOCAL_FILE"; then
+    local_ok=1
+    echo "LOCAL 9579: OK - file and expected quote are present at $LOCAL_FILE"
+else
+    echo "NOTICE: LOCAL 9579 is missing or does not contain the expected quote: $LOCAL_FILE"
+fi
+
+# curl is intentionally used only for a read-only public check. A failure can mean
+# no Internet, a GitHub outage, a missing branch/file, or another transient problem.
+if ! command -v curl >/dev/null 2>&1; then
+    echo "NOTICE: curl is unavailable, so the GitHub 9579 check could not run."
+    exit $(( local_ok ? 0 : 1 ))
+fi
+
+remote="$(curl -fsSL --connect-timeout 5 --max-time 10 "$REMOTE_RAW" 2>/dev/null || true)"
+if [[ -n "$remote" ]] && grep -Fq "$EXPECTED_QUOTE" <<<"$remote"; then
+    echo "GITHUB 9579: OK - master contains 9579.txt with the expected quote."
+else
+    echo "NOTICE: GitHub master does not currently expose 9579.txt with the expected quote."
+    echo "Check: https://github.com/we6jbo/T14FinishService/blob/master/9579.txt"
+    echo "If you intend it to be public, add/commit/push 9579.txt when you are ready."
+    exit 1
+fi

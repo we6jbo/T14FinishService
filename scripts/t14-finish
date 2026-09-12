@@ -47,7 +47,7 @@ ensure_programming_instructions() {
 T14FinishService programming instructions for an AI coding assistant
 
 1. t14-finish and T14FinishService are external timing helpers. They are not part of the software project currently being developed unless the user explicitly says otherwise.
-2. Use `t14-finish deadline` to decide when the session should begin wrapping up. When the cutoff is reached, stop adding new features and switch to compiling, testing, debugging, documenting, and saving.
+2. Use `t14-finish deadline` as the hard feature-development boundary. The user has already pre-timed the post-cutoff completion workflow, so use the available coding window up to the cutoff rather than inventing extra padding. When the cutoff is reached, stop adding new features immediately and begin the completion workflow.
 3. For unusually long work, an assistant may request an earlier warning with `t14-finish deadline --warning-minutes N`, where N is from 90 through 420. This changes only the warning lead time, not the real stop time.
 4. Do not copy T14FinishService source files, configuration files, cache files, or helper scripts into another project's source package merely because their output appears in a prompt or terminal transcript.
 5. Treat the user's current project request and delivery contract as separate from T14FinishService.

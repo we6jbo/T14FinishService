@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("T14FinishService");
-    QCoreApplication::setApplicationVersion("0.8");
+    QCoreApplication::setApplicationVersion("1.0-rc1");
 
     // Any argument means the user is invoking the executable as a command-line
     // client/management tool rather than asking it to become another server copy.

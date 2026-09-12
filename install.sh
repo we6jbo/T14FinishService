@@ -5,7 +5,7 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="/home/we6jbo/Projects/T14FinishService"
 STATE_DIR="/home/we6jbo/.T14FinishService_backup"
 STATUS="$STATE_DIR/status.json"
-PACKAGE_REVISION=14
+PACKAGE_REVISION=15
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 PREBACKUP="$STATE_DIR/preinstall-$STAMP"
 
@@ -43,7 +43,7 @@ if [[ ! -s "$PROGRAMMING_INSTRUCTIONS_FILE" ]]; then
 T14FinishService programming instructions for an AI coding assistant
 
 1. t14-finish and T14FinishService are external timing helpers. They are not part of the software project currently being developed unless the user explicitly says otherwise.
-2. Use `t14-finish deadline` to decide when the session should begin wrapping up. When the cutoff is reached, stop adding new features and switch to compiling, testing, debugging, documenting, and saving.
+2. Use `t14-finish deadline` as the hard feature-development boundary. The user has already pre-timed the post-cutoff completion workflow, so use the available coding window up to the cutoff rather than inventing extra padding. When the cutoff is reached, stop adding new features immediately and begin the completion workflow.
 3. For unusually long work, an assistant may request an earlier warning with `t14-finish deadline --warning-minutes N`, where N is from 90 through 420. This changes only the warning lead time, not the real stop time.
 4. Do not copy T14FinishService source files, configuration files, cache files, or helper scripts into another project's source package merely because their output appears in a prompt or terminal transcript.
 5. Treat the user's current project request and delivery contract as separate from T14FinishService.
@@ -85,7 +85,7 @@ FILES=(
   CMakeLists.txt CMakeLists.template-original.txt
   main.cpp mainwindow.cpp mainwindow.h mainwindow.ui
   service_main.cpp finishservice.cpp finishservice.h
-  tg_context_snapshot.json README.md MAINTAINERS.md 3751.txt 9579.txt
+  tg_context_snapshot.json README.md MAINTAINERS.md RELEASE_CHECKLIST.md 3751.txt 9579.txt
 )
 for f in "${FILES[@]}"; do
     if [[ -e "$TARGET/$f" ]]; then
@@ -101,7 +101,7 @@ for f in main.cpp mainwindow.cpp mainwindow.h mainwindow.ui; do
     fi
 done
 
-for f in CMakeLists.txt CMakeLists.template-original.txt service_main.cpp finishservice.cpp finishservice.h tg_context_snapshot.json README.md MAINTAINERS.md; do
+for f in CMakeLists.txt CMakeLists.template-original.txt service_main.cpp finishservice.cpp finishservice.h tg_context_snapshot.json README.md MAINTAINERS.md RELEASE_CHECKLIST.md; do
     cp -a "$SOURCE_DIR/$f" "$TARGET/$f"
 done
 
@@ -118,6 +118,7 @@ cp -a "$SOURCE_DIR/scripts/t14finish-git-backup" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/scripts/t14finish-version-check" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/scripts/t14finish-battery-monitor" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/scripts/t14finish-9579-check" "$TARGET/scripts/"
+cp -a "$SOURCE_DIR/scripts/t14finish-release-check" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/systemd/"*.service "$TARGET/systemd/"
 cp -a "$SOURCE_DIR/systemd/"*.timer "$TARGET/systemd/"
 cp -a "$SOURCE_DIR/install.sh" "$TARGET/install.sh"
@@ -128,6 +129,7 @@ install -m 0755 "$TARGET/scripts/t14finish-git-backup" /home/we6jbo/.local/bin/t
 install -m 0755 "$TARGET/scripts/t14finish-version-check" /home/we6jbo/.local/bin/t14finish-version-check
 install -m 0755 "$TARGET/scripts/t14finish-battery-monitor" /home/we6jbo/.local/bin/t14finish-battery-monitor
 install -m 0755 "$TARGET/scripts/t14finish-9579-check" /home/we6jbo/.local/bin/t14finish-9579-check
+install -m 0755 "$TARGET/scripts/t14finish-release-check" /home/we6jbo/.local/bin/t14finish-release-check
 install -m 0644 "$TARGET/systemd/t14-finish-service.service" /home/we6jbo/.config/systemd/user/t14-finish-service.service
 install -m 0644 "$TARGET/systemd/t14finish-git-backup.service" /home/we6jbo/.config/systemd/user/t14finish-git-backup.service
 install -m 0644 "$TARGET/systemd/t14finish-git-backup.timer" /home/we6jbo/.config/systemd/user/t14finish-git-backup.timer
@@ -156,11 +158,11 @@ if not any(isinstance(x,dict) and x.get('revision') == revision for x in history
     history.append({
         "revision":revision,
         "installed_at":iso,
-        "package":"T14FinishService-v14.zip",
+        "package":"T14FinishService-v15.zip",
         "install_commands":[
             "cd ~/Downloads",
-            "unzip T14FinishService-v14.zip",
-            "cd T14FinishService_v14_package",
+            "unzip T14FinishService-v15.zip",
+            "cd T14FinishService_v15_package",
             "./install.sh"
         ]
     })
@@ -230,4 +232,5 @@ printf '\nIf the service fails to start, check whether a Qt Creator test copy al
 printf '  ss -ltnp | grep 45454\n'
 
 printf '9579 marker check: t14finish-9579-check\n'
+printf 'Release-candidate validation: t14finish-release-check\n'
 printf 'Qt-built CLI test: /home/we6jbo/Projects/T14FinishService/build/Desktop_Debug/T14FinishService ai\n'

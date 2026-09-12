@@ -1,3 +1,49 @@
+# T14FinishService v1.0-rc1 / Package Revision 15
+
+Revision 15 is the final pre-publication release candidate. Feature development is considered complete. Changes after this point should normally be limited to defects, documentation corrections, packaging fixes, and release engineering.
+
+## Revision 15 timing handoff
+
+The `t14-finish deadline` warning now explicitly tells coding assistants that the post-cutoff workflow has already been pre-timed. Before the cutoff, the available coding window may be used fully; an assistant should not invent extra schedule padding. At the cutoff, feature development stops immediately and the existing completion workflow begins.
+
+The existing 90-420 minute configurable warning window remains unchanged. The cutoff itself is never moved by the warning setting.
+
+## Release-candidate validation
+
+Revision 15 adds:
+
+```bash
+t14finish-release-check
+```
+
+This is a read-only validation tool. It checks required files, provenance identifiers, configuration, cache location, service/client availability, build output, and Git status. It does not commit, push, install, or delete anything. See `RELEASE_CHECKLIST.md`.
+
+## Install revision 15
+
+```bash
+cd ~/Downloads
+unzip T14FinishService-v15.zip
+cd T14FinishService_v15_package
+./install.sh
+```
+
+Then run:
+
+```bash
+t14finish-release-check
+t14-finish ping
+t14-finish deadline
+t14-finish coding-state --json
+```
+
+## Next phase
+
+Revision 16 is the GitHub publication milestone. Do not add major features merely to reach another revision number. Resolve release-candidate defects first, then publish and continue with Flatpak/Flathub and Snap release engineering.
+
+---
+
+## Historical revision notes
+
 # T14FinishService revision 11
 
 Revision 11 adds an explicit integration note to every `t14-finish deadline` response. The note tells ChatGPT and other coding assistants that `t14-finish` / T14FinishService is an external timing helper only and is **not** part of whichever software project is currently being developed. It must not be copied into that project's source tree, ZIP/package, build configuration, documentation, or repository unless the user explicitly requests that integration. This is specifically intended for workflows where an install script runs `t14-finish deadline` and its terminal output is pasted into a new coding chat.

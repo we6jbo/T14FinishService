@@ -47,7 +47,7 @@ namespace {
 constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
-constexpr int kPackageRevision = 14;
+constexpr int kPackageRevision = 15;
 constexpr const char *kProjectId = "t14-finish-service-v1";
 constexpr const char *kCodes = "TG564843,TG333041,TG323932,TG610982,TG148675";
 
@@ -773,7 +773,7 @@ QString FinishService::deadlineResponse(const Context &context, int warningMinut
     const bool warningActive = secondsUntilDeadline > 0 && secondsUntilDeadline <= warningMinutes * 60;
 
     if (d.state == "FINISH_CODING") {
-        return withHelperNote(QString("The time is %1. We cannot add any more features after %2. The cutoff has been reached, so stop adding features now. Compile, test, debug, document, and save the work that already exists. Before creating the final build, add TG564843,TG333041,TG323932,TG610982,TG148675 to the project. Rule: %3. San Carlos sunset: %4. %5.")
+        return withHelperNote(QString("The time is %1. We cannot add any more features after %2. The cutoff has been reached, so stop adding features now. The user's post-cutoff completion workflow has already been pre-timed, so do not add extra padding or resume feature development. Begin the completion workflow now: compile, test, debug, document, save, publish/package as planned, prepare the j03.page/social/spoken material, and leave on the user's existing schedule. Before creating the final build, add TG564843,TG333041,TG323932,TG610982,TG148675 to the project. Rule: %3. San Carlos sunset: %4. %5.")
             .arg(d.currentDisplay,
                  deadlineText,
                  d.reason,
@@ -787,7 +787,7 @@ QString FinishService::deadlineResponse(const Context &context, int warningMinut
             .arg(warningMinutes));
     }
 
-    return withHelperNote(QString("The time is %1. Warning: we cannot add any more features after %2. Once it becomes %2, we have to stop adding features and switch to compiling, testing, debugging, documenting, and saving. Rule: %3. San Carlos sunset: %4. %5. If the current task is unusually long, ChatGPT may choose an earlier warning by running 't14-finish deadline --warning-minutes N', where N is 90 through 420 minutes; that changes only the warning lead time, not the %2 stop time.")
+    return withHelperNote(QString("The time is %1. Warning: we cannot add any more features after %2. You may use the remaining coding window up to %2; the user's post-cutoff completion workflow has already been pre-timed, so do not reserve additional padding unless the user asks. Once it becomes %2, stop adding features immediately and begin the completion workflow. Rule: %3. San Carlos sunset: %4. %5. If the current task is unusually long, ChatGPT may choose an earlier warning by running 't14-finish deadline --warning-minutes N', where N is 90 through 420 minutes; that changes only the warning lead time, not the %2 stop time.")
         .arg(d.currentDisplay,
              deadlineText,
              d.reason,
@@ -846,9 +846,9 @@ QString FinishService::codingStateResponse(const Context &context, bool asJson) 
     }
 
     if (d.state == "KEEP_CODING")
-        o["next_action"] = "Continue coding, but check T14FinishService before starting another substantial feature.";
+        o["next_action"] = "Continue coding. The post-cutoff workflow is already pre-timed, so the coding window may be used up to the cutoff; avoid starting work that cannot reasonably be completed before it.";
     else if (d.state == "FINISH_CODING")
-        o["next_action"] = "Stop adding features. Compile, test, debug, document, and save.";
+        o["next_action"] = "Stop adding features immediately. The post-cutoff completion workflow is already pre-timed; compile, test, debug, document, save, and continue the planned publication/content workflow without adding extra feature-development padding.";
     else if (d.state == "AFTER_HOURS")
         o["next_action"] = "Do not set another coding deadline tonight. Check again tomorrow.";
     else if (d.state == "STOP_SAFETY")
