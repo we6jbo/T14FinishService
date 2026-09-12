@@ -1,18 +1,18 @@
 name: t14finishservice
 base: core24
 version: '1.0.0'
-title: 'T14FinishService'
+title: T14FinishService
 summary: Coding session timing and workflow service
 description: |
   T14FinishService is a background Qt/C++ service that helps manage
   coding-session deadlines using system state, battery information,
   weather, sunset timing, caching, and configurable workflow rules.
 
-license: 'Apache-2.0'
-website: 'https://j03.page/utils/'
-source-code: 'https://github.com/we6jbo/T14FinishService'
-issues: 'https://github.com/we6jbo/T14FinishService/issues'
-contact: 'mailto:joneal97m@gmail.com'
+license: Apache-2.0
+website: https://j03.page/t14finishservice/
+source-code: https://github.com/we6jbo/T14FinishService
+issues: https://github.com/we6jbo/T14FinishService/issues
+contact: https://github.com/we6jbo/T14FinishService/issues
 
 grade: stable
 confinement: strict
@@ -39,4 +39,3 @@ parts:
     stage-packages:
       - libqt6core6t64
       - libqt6network6
-icon: 'org.oneal.T14FinishService.svg'
