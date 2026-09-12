@@ -5,11 +5,34 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="/home/we6jbo/Projects/T14FinishService"
 STATE_DIR="/home/we6jbo/.T14FinishService_backup"
 STATUS="$STATE_DIR/status.json"
-PACKAGE_REVISION=7
+PACKAGE_REVISION=9
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 PREBACKUP="$STATE_DIR/preinstall-$STAMP"
 
 mkdir -p "$TARGET" "$STATE_DIR" "$PREBACKUP" /home/we6jbo/.local/bin /home/we6jbo/.config/systemd/user
+
+# Revision 9 keeps the persistent Internet fallback cache outside /home/we6jbo.
+# /var/cache is appropriate for regenerable data that should survive normal reboots.
+CACHE_DIR="/var/cache/t14finishservice"
+CACHE_OWNER="$(id -un)"
+CACHE_GROUP="$(id -gn)"
+if [[ ! -d "$CACHE_DIR" || ! -w "$CACHE_DIR" ]]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "ERROR: sudo is required once to create $CACHE_DIR outside your home directory." >&2
+        exit 1
+    fi
+    sudo install -d -m 0750 -o "$CACHE_OWNER" -g "$CACHE_GROUP" "$CACHE_DIR"
+fi
+
+# Preserve any useful cache collected by revision 8, but place the active copy in /var/cache.
+OLD_CACHE="$STATE_DIR/cache"
+if [[ -d "$OLD_CACHE" ]]; then
+    for cache_file in weather.json sunset-365.json; do
+        if [[ -f "$OLD_CACHE/$cache_file" && ! -f "$CACHE_DIR/$cache_file" ]]; then
+            cp -a "$OLD_CACHE/$cache_file" "$CACHE_DIR/$cache_file" || true
+        fi
+    done
+fi
 
 FILES=(
   CMakeLists.txt CMakeLists.template-original.txt
@@ -81,11 +104,11 @@ if not any(isinstance(x,dict) and x.get('revision') == revision for x in history
     history.append({
         "revision":revision,
         "installed_at":iso,
-        "package":"T14FinishService-v7.zip",
+        "package":"T14FinishService-v9.zip",
         "install_commands":[
             "cd ~/Downloads",
-            "unzip T14FinishService-v7.zip",
-            "cd T14FinishService_v7_package",
+            "unzip T14FinishService-v9.zip",
+            "cd T14FinishService_v9_package",
             "./install.sh"
         ]
     })
@@ -139,6 +162,9 @@ printf 'AI JSON: t14-finish coding-state --json\n'
 printf 'Version timer: systemctl --user status t14finish-version-check.timer\n'
 printf 'Battery monitor: systemctl --user status t14finish-battery-monitor.timer\n'
 printf 'Battery report: t14-finish battery-policy --json\n'
+printf 'Persistent cache: ls -lh /var/cache/t14finishservice\n'
+printf 'Weather cache: python3 -m json.tool /var/cache/t14finishservice/weather.json | head -80\n'
+printf 'Sunset cache: python3 -m json.tool /var/cache/t14finishservice/sunset-365.json | head -80\n'
 printf 'Version state: python3 -m json.tool /home/we6jbo/.T14FinishService_backup/status.json\n'
 printf '\nIf the service fails to start, check whether a Qt Creator test copy already owns port 45454:\n'
 printf '  ss -ltnp | grep 45454\n'

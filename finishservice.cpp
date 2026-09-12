@@ -29,7 +29,7 @@ namespace {
 constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
-constexpr int kPackageRevision = 7;
+constexpr int kPackageRevision = 9;
 constexpr const char *kProjectId = "t14-finish-service-v1";
 constexpr const char *kCodes = "TG564843,TG333041,TG323932,TG610982,TG148675";
 
@@ -86,8 +86,19 @@ bool FinishService::start()
     connect(&m_server, &QTcpServer::newConnection, this, &FinishService::onNewConnection);
 
     const Safety safety = checkSafety();
-    if (safety.ok)
+    if (safety.ok) {
+        bool latOk = false;
+        bool lonOk = false;
+        const double configuredLat = qEnvironmentVariable("T14FINISH_LAT").toDouble(&latOk);
+        const double configuredLon = qEnvironmentVariable("T14FINISH_LON").toDouble(&lonOk);
+        const double lat = latOk ? configuredLat : kDefaultLatitude;
+        const double lon = lonOk ? configuredLon : kDefaultLongitude;
+        // Keep at least 365 future sunset entries on disk. Existing entries are not
+        // discarded, so they become historical data after later reboots.
+        ensureSunsetCache(QDate::currentDate(), lat, lon);
+        recordBatteryActivity("cache_write");
         attemptTgRegistrationOnce();
+    }
 
     return true;
 }
@@ -191,7 +202,7 @@ FinishService::Safety FinishService::checkSafety() const
 
 QString FinishService::cacheDirectory() const
 {
-    return QDir::homePath() + "/.T14FinishService_backup/cache";
+    return QStringLiteral("/var/cache/t14finishservice");
 }
 
 FinishService::WeatherDay FinishService::readWeatherCache(const QDate &date, int maxAgeSeconds) const
@@ -213,13 +224,15 @@ FinishService::WeatherDay FinishService::readWeatherCache(const QDate &date, int
         return out;
 
     const QDateTime fetched = QDateTime::fromString(day.value("fetched_at").toString(), Qt::ISODate);
-    if (!fetched.isValid() || fetched.secsTo(QDateTime::currentDateTime()) > maxAgeSeconds)
+    if (maxAgeSeconds > 0 && (!fetched.isValid() || fetched.secsTo(QDateTime::currentDateTime()) > maxAgeSeconds))
         return out;
 
     out.known = true;
     out.rainMm = day.value("rain_mm").toDouble();
     out.precipitationProbability = day.value("precipitation_probability").toInt();
     out.rainy = day.value("rainy").toBool();
+    out.sunset = QTime::fromString(day.value("sunset").toString(), "HH:mm:ss");
+    out.fromCache = true;
     out.source = day.value("source").toString() + " [cache]";
     return out;
 }
@@ -229,6 +242,7 @@ void FinishService::writeWeatherCache(const QJsonObject &dailyObject, double lat
     const QJsonArray dates = dailyObject.value("time").toArray();
     const QJsonArray rain = dailyObject.value("rain_sum").toArray();
     const QJsonArray prob = dailyObject.value("precipitation_probability_max").toArray();
+    const QJsonArray sunsets = dailyObject.value("sunset").toArray();
     if (dates.isEmpty())
         return;
 
@@ -256,6 +270,11 @@ void FinishService::writeWeatherCache(const QJsonObject &dailyObject, double lat
         day["rain_mm"] = rainMm;
         day["precipitation_probability"] = probability;
         day["rainy"] = rainMm > 0.0 || probability >= 50;
+        if (i < sunsets.size()) {
+            const QDateTime sunsetDateTime = QDateTime::fromString(sunsets.at(i).toString(), Qt::ISODate);
+            if (sunsetDateTime.isValid())
+                day["sunset"] = sunsetDateTime.time().toString("HH:mm:ss");
+        }
         day["source"] = source;
         days[date] = day;
     }
@@ -264,7 +283,8 @@ void FinishService::writeWeatherCache(const QJsonObject &dailyObject, double lat
     root["location"] = QString::fromLatin1(kDefaultLocationLabel);
     root["latitude"] = latitude;
     root["longitude"] = longitude;
-    root["max_age_seconds"] = kWeatherCacheMaxAgeSeconds;
+    root["normal_freshness_seconds"] = kWeatherCacheMaxAgeSeconds;
+    root["usage_policy"] = "online first; cache only when network is unavailable or intentionally suppressed by low-battery policy";
     root["days"] = days;
 
     const QString tmp = path + ".tmp";
@@ -279,8 +299,6 @@ void FinishService::writeWeatherCache(const QJsonObject &dailyObject, double lat
 
 FinishService::WeatherDay FinishService::fetchWeather(const Context &context) const
 {
-    WeatherDay out;
-
     bool latOk = false;
     bool lonOk = false;
     const double configuredLat = qEnvironmentVariable("T14FINISH_LAT").toDouble(&latOk);
@@ -290,29 +308,38 @@ FinishService::WeatherDay FinishService::fetchWeather(const Context &context) co
     const QString tz = qEnvironmentVariableIsSet("T14FINISH_TIMEZONE")
         ? qEnvironmentVariable("T14FINISH_TIMEZONE") : QString::fromLatin1(kDefaultTimeZone);
 
-    const WeatherDay cached = readWeatherCache(context.date, kWeatherCacheMaxAgeSeconds);
-    if (cached.known) {
-        recordBatteryActivity("cache_read");
-        return cached;
-    }
+    auto cacheFallback = [&](const QString &why) -> WeatherDay {
+        WeatherDay cached = readWeatherCache(context.date, -1);
+        if (cached.known) {
+            cached.source += " [offline fallback: " + why + "]";
+            recordBatteryActivity("cache_read");
+            return cached;
+        }
+        WeatherDay missing;
+        missing.error = why + "; no cached weather entry is available for " + context.date.toString(Qt::ISODate);
+        return missing;
+    };
 
+    // Cache is not the normal data source in revision 9. We try the Internet first.
+    // The only exception is when adaptive low-battery policy intentionally suppresses
+    // a network request, which is treated the same as temporary network unavailability.
     const int battery = batteryPercent();
     const QString weatherPolicy = batteryFeaturePolicy("weather_network");
     if (battery >= 0 && battery < kMinimumBatteryPercent
         && (weatherPolicy == "BLOCK" || weatherPolicy == "MINIMIZE")) {
-        // When learning says network weather is costly, prefer a stale forecast over
-        // another network request. MINIMIZE allows up to 24 hours; BLOCK uses the
-        // same stale-cache fallback and avoids network entirely.
-        WeatherDay stale = readWeatherCache(context.date, 24 * 60 * 60);
-        if (stale.known) {
-            stale.source += QString(" [low-battery %1 policy]").arg(weatherPolicy.toLower());
+        WeatherDay cached = readWeatherCache(context.date, -1);
+        if (cached.known) {
+            cached.source += QString(" [low-battery %1 fallback]").arg(weatherPolicy.toLower());
             recordBatteryActivity("cache_read");
-            return stale;
+            return cached;
         }
         if (weatherPolicy == "BLOCK") {
-            out.error = "weather network refresh blocked by learned low-battery policy and no usable cached forecast exists";
+            WeatherDay out;
+            out.error = "weather network refresh blocked by learned low-battery policy and no cached forecast exists";
             return out;
         }
+        // MINIMIZE with no cache still permits one online request because otherwise
+        // there is no weather information to make the deadline decision.
     }
 
     recordBatteryActivity("weather_network");
@@ -320,7 +347,7 @@ FinishService::WeatherDay FinishService::fetchWeather(const Context &context) co
     QUrlQuery query;
     query.addQueryItem("latitude", QString::number(lat, 'f', 4));
     query.addQueryItem("longitude", QString::number(lon, 'f', 4));
-    query.addQueryItem("daily", "rain_sum,precipitation_probability_max");
+    query.addQueryItem("daily", "rain_sum,precipitation_probability_max,sunset");
     query.addQueryItem("timezone", tz);
     query.addQueryItem("start_date", context.date.toString(Qt::ISODate));
     query.addQueryItem("end_date", context.date.addDays(15).toString(Qt::ISODate));
@@ -339,38 +366,37 @@ FinishService::WeatherDay FinishService::fetchWeather(const Context &context) co
     if (!timer.isActive()) {
         reply->abort();
         reply->deleteLater();
-        out.error = "weather request timed out";
-        return out;
+        return cacheFallback("weather request timed out");
     }
     timer.stop();
 
     if (reply->error() != QNetworkReply::NoError) {
-        out.error = reply->errorString();
+        const QString error = reply->errorString();
         reply->deleteLater();
-        return out;
+        return cacheFallback("weather request failed: " + error);
     }
 
     QJsonParseError pe;
     const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &pe);
     reply->deleteLater();
-    if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
-        out.error = "weather service returned invalid JSON";
-        return out;
-    }
+    if (pe.error != QJsonParseError::NoError || !doc.isObject())
+        return cacheFallback("weather service returned invalid JSON");
 
     const QJsonObject daily = doc.object().value("daily").toObject();
     const QJsonArray dates = daily.value("time").toArray();
     const QJsonArray rain = daily.value("rain_sum").toArray();
     const QJsonArray prob = daily.value("precipitation_probability_max").toArray();
-    if (dates.isEmpty() || (rain.isEmpty() && prob.isEmpty())) {
-        out.error = "weather service did not return rain data for the requested date";
-        return out;
-    }
+    const QJsonArray sunsets = daily.value("sunset").toArray();
+    if (dates.isEmpty() || (rain.isEmpty() && prob.isEmpty()))
+        return cacheFallback("weather service did not return usable daily data");
 
     const QString source = QStringLiteral("Open-Meteo forecast for %1 (%2,%3)")
         .arg(QString::fromLatin1(kDefaultLocationLabel))
         .arg(lat, 0, 'f', 4)
         .arg(lon, 0, 'f', 4);
+
+    // Persist every future day the provider returned. Old entries are retained, so the
+    // file gradually becomes historical weather data across reboots.
     writeWeatherCache(daily, lat, lon, source);
     recordBatteryActivity("weather_network");
 
@@ -378,16 +404,22 @@ FinishService::WeatherDay FinishService::fetchWeather(const Context &context) co
     for (int i = 0; i < dates.size(); ++i) {
         if (dates.at(i).toString() != wanted)
             continue;
+        WeatherDay out;
         out.rainMm = i < rain.size() ? rain.at(i).toDouble() : 0.0;
         out.precipitationProbability = i < prob.size() ? prob.at(i).toInt() : 0;
         out.rainy = out.rainMm > 0.0 || out.precipitationProbability >= 50;
+        if (i < sunsets.size()) {
+            const QDateTime sunsetDateTime = QDateTime::fromString(sunsets.at(i).toString(), Qt::ISODate);
+            if (sunsetDateTime.isValid())
+                out.sunset = sunsetDateTime.time();
+        }
         out.known = true;
+        out.fromCache = false;
         out.source = source;
         return out;
     }
 
-    out.error = "weather service did not include the requested date";
-    return out;
+    return cacheFallback("weather service did not include the requested date");
 }
 
 void FinishService::ensureSunsetCache(const QDate &anchorDate, double latitude, double longitude) const
@@ -427,7 +459,9 @@ void FinishService::ensureSunsetCache(const QDate &anchorDate, double latitude, 
     root["schema"] = 1;
     root["generated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
     root["start_date"] = anchorDate.toString(Qt::ISODate);
-    root["days_cached"] = kSunsetCacheDays;
+    root["days_cached"] = days.size();
+    root["minimum_forward_days"] = kSunsetCacheDays;
+    root["retention"] = "existing entries are retained as historical sunset data";
     root["location"] = QString::fromLatin1(kDefaultLocationLabel);
     root["latitude"] = latitude;
     root["longitude"] = longitude;
@@ -445,7 +479,9 @@ void FinishService::ensureSunsetCache(const QDate &anchorDate, double latitude, 
 
 QTime FinishService::cachedSunset(const QDate &date, double latitude, double longitude, QString *error) const
 {
-    ensureSunsetCache(date, latitude, longitude);
+    // This method is used only after online sunset/weather data is unavailable.
+    // It reads the persistent cache first, then falls back to a local astronomical
+    // calculation if the requested day was never cached.
     QFile f(cacheDirectory() + "/sunset-365.json");
     if (f.open(QIODevice::ReadOnly)) {
         QJsonParseError pe;
@@ -548,7 +584,7 @@ bool FinishService::currentTimeFromContext(const Context &context, QTime *time, 
     }
 
     if (time) *time = parsed;
-    if (display) *display = raw.isEmpty() ? parsed.toString("HH:mm") : raw;
+    if (display) *display = parsed.toString("h:mm AP");
     return true;
 }
 
@@ -597,20 +633,21 @@ FinishService::Decision FinishService::makeDecision(const Context &context) cons
         return d;
     }
 
+    // At 8:00 PM or later, do not create another coding deadline for tonight.
+    // This also avoids unnecessary weather/network/sunset work after the work window.
+    if (d.currentTime >= QTime(20, 0)) {
+        d.state = "AFTER_HOURS";
+        d.reason = "it is 8:00 PM or later; no new coding deadline will be set until the next day";
+        d.ok = true;
+        return d;
+    }
+
     bool latOk = false;
     bool lonOk = false;
     const double configuredLat = qEnvironmentVariable("T14FINISH_LAT").toDouble(&latOk);
     const double configuredLon = qEnvironmentVariable("T14FINISH_LON").toDouble(&lonOk);
     const double lat = latOk ? configuredLat : kDefaultLatitude;
     const double lon = lonOk ? configuredLon : kDefaultLongitude;
-
-    QString sunsetError;
-    d.sunset = cachedSunset(context.date, lat, lon, &sunsetError);
-    if (!d.sunset.isValid()) {
-        d.state = "ERROR";
-        d.reason = "unable to calculate sunset: " + sunsetError;
-        return d;
-    }
 
     const WeatherDay weather = fetchWeather(context);
     d.rainKnown = weather.known;
@@ -619,6 +656,24 @@ FinishService::Decision FinishService::makeDecision(const Context &context) cons
     d.precipitationProbability = weather.precipitationProbability;
     d.weatherSource = weather.source;
     d.weatherError = weather.error;
+
+    QString sunsetError;
+    if (weather.sunset.isValid()) {
+        // Online Open-Meteo is the normal sunset source. If fetchWeather had to
+        // fall back to its persistent cache, the cached sunset travels with it.
+        d.sunset = weather.sunset;
+    } else if (weather.fromCache || !weather.known) {
+        d.sunset = cachedSunset(context.date, lat, lon, &sunsetError);
+    } else {
+        // Internet was available but did not provide a usable sunset value. Do not
+        // consult the cache in this case; calculate it locally instead.
+        d.sunset = localSunset(context.date, lat, lon, &sunsetError);
+    }
+    if (!d.sunset.isValid()) {
+        d.state = "ERROR";
+        d.reason = "unable to determine sunset: " + sunsetError;
+        return d;
+    }
 
     const int day = context.date.dayOfWeek();
     if (weather.known && weather.rainy && (day == Qt::Monday || day == Qt::Tuesday)) {
@@ -656,6 +711,9 @@ QString FinishService::deadlineResponse(const Context &context) const
         return "TIME_HIDDEN: " + d.reason + ".";
     if (!d.ok)
         return "ERROR: " + d.reason;
+    if (d.state == "AFTER_HOURS")
+        return QString("The time is %1. It is 8:00 PM or later, so T14FinishService will not set another coding deadline tonight. Check again tomorrow for the next deadline.")
+            .arg(d.currentDisplay);
 
     QString weatherText;
     if (d.rainKnown) {
@@ -666,7 +724,7 @@ QString FinishService::deadlineResponse(const Context &context) const
         weatherText = "Rain forecast unavailable; conservative non-rain schedule used";
     }
 
-    return QString("The time is %1. Finish writing new program features by %2. Then compile, test, debug, document, and save. Rule: %3. Calculated San Carlos sunset: %4. %5.")
+    return QString("The time is %1. Finish writing new program features by %2. Then compile, test, debug, document, and save. Rule: %3. San Carlos sunset: %4. %5.")
         .arg(d.currentDisplay,
              d.deadline.toString("h:mm AP"),
              d.reason,
@@ -706,9 +764,12 @@ QString FinishService::codingStateResponse(const Context &context, bool asJson) 
 
     if (context.timeVisible && d.currentTime.isValid()) {
         o["current_time"] = d.currentDisplay;
-        o["coding_deadline"] = d.deadline.toString("HH:mm");
-        o["minutes_remaining"] = d.minutesRemaining;
-        o["sunset"] = d.sunset.toString("HH:mm");
+        if (d.deadline.isValid()) {
+            o["coding_deadline"] = d.deadline.toString("h:mm AP");
+            o["minutes_remaining"] = d.minutesRemaining;
+        }
+        if (d.sunset.isValid())
+            o["sunset"] = d.sunset.toString("h:mm AP");
     }
 
     o["rain_known"] = d.rainKnown;
@@ -725,6 +786,8 @@ QString FinishService::codingStateResponse(const Context &context, bool asJson) 
         o["next_action"] = "Continue coding, but check T14FinishService before starting another substantial feature.";
     else if (d.state == "FINISH_CODING")
         o["next_action"] = "Stop adding features. Compile, test, debug, document, and save.";
+    else if (d.state == "AFTER_HOURS")
+        o["next_action"] = "Do not set another coding deadline tonight. Check again tomorrow.";
     else if (d.state == "STOP_SAFETY")
         o["next_action"] = "Stop writes because the disk-space safety requirement failed.";
 
@@ -838,11 +901,13 @@ QString FinishService::handleCommand(const QString &rawCommand)
         o["low_battery_threshold_percent"] = kMinimumBatteryPercent;
         o["low_battery_mode"] = safety.batteryPercent >= 0 && safety.batteryPercent < kMinimumBatteryPercent;
         o["weather_network_policy"] = batteryFeaturePolicy("weather_network");
+        o["cache_directory"] = cacheDirectory();
+        o["cache_policy"] = "internet first; persistent cache only when network is unavailable or suppressed by low-battery policy";
         o["git_backup_policy"] = batteryFeaturePolicy("git_backup");
         o["version_check_policy"] = batteryFeaturePolicy("version_check");
         o["codes"] = QString::fromLatin1(kCodes);
-        o["sunset_mode"] = "365-day local cache; astronomical calculation on cache miss";
-        o["weather_cache"] = "fresh cached forecast first; Internet on cache miss/stale entry";
+        o["sunset_mode"] = "online sunset first; persistent 365+ day fallback cache; local astronomical calculation if offline cache misses";
+        o["weather_cache"] = "Internet first; persistent cache only when Internet is unavailable or low-battery policy suppresses network access";
         o["weather_area"] = QString::fromLatin1(kDefaultLocationLabel);
         return compactJson(o);
     }

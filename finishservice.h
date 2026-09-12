@@ -42,6 +42,8 @@ private:
         bool rainy = false;
         double rainMm = 0.0;
         int precipitationProbability = 0;
+        QTime sunset;
+        bool fromCache = false;
         QString source;
         QString error;
     };

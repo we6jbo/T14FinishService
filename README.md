@@ -1,58 +1,134 @@
-# T14FinishService revision 7
+# T14FinishService v0.9 / Package Revision 9
 
-T14FinishService is a background-only Qt/C++ service for the Manjaro T14. It supplies coding-session decisions to Bash scripts and AI coding tools through localhost port 45454.
+T14FinishService is a background-only Qt/C++ service for the Manjaro T14. It keeps the existing battery, disk-space, weather, sunset, schedule, coding-state, Git backup, weekly version-check, provenance, and project-milestone behavior from earlier revisions.
 
-## Revision 7: adaptive battery use
+## Revision 9: persistent offline cache outside the home directory
 
-Revision 7 keeps the 55% battery check but changes its meaning. Battery below 55% no longer disables the whole service. Low-cost operations such as reading the local cache, reading the context file, calculating sunset/deadlines, and returning coding-state information remain available. Features that may use more CPU, network, or disk are monitored separately and can be minimized or deferred only after the T14 has collected enough battery-use evidence to show that the feature consumes materially more power than the machine's normal baseline.
+Revision 9 moves the active weather/sunset cache outside `/home/we6jbo/` to:
 
-A low-overhead user systemd timer samples battery telemetry every 10 minutes. Data is stored in:
+```text
+/var/cache/t14finishservice/
+```
 
-`/home/we6jbo/.T14FinishService_backup/battery_usage.json`
+The installer creates that directory with ownership for the current user. Because `/var/cache` is outside the home directory and normally survives ordinary reboots, the cached information remains available after restarting the T14.
 
-A compact current summary is also stored under `battery_monitor` in:
+The active cache files are:
 
-`/home/we6jbo/.T14FinishService_backup/status.json`
+```text
+/var/cache/t14finishservice/weather.json
+/var/cache/t14finishservice/sunset-365.json
+```
 
-The monitor reads battery capacity/status and, when exposed by Linux, instantaneous `power_now`; it falls back to `current_now * voltage_now` when needed. Learning uses discharging samples only so charging behavior does not distort the baseline.
+The installer will copy the old revision-8 cache into `/var/cache/t14finishservice/` if useful files exist and the new cache does not already contain them. The old home-directory cache is not used by revision 9.
 
-The current learning rule requires at least five baseline samples and five samples for a feature before restricting it. Until enough evidence exists, the feature is allowed rather than being blocked merely because battery is below 55%. Known low-cost local/cache operations are always allowed. A feature is learned as `MINIMIZE` when its median draw is moderately above baseline, and `BLOCK` when it is substantially above baseline. These policies are only enforced below 55%; at or above 55% they resolve to `ALLOW`.
+## Internet-first behavior
 
-Weather keeps the cache-first behavior from revision 6. If learned telemetry says weather network refresh should be minimized while battery is low, the service first accepts a cached forecast up to 24 hours old. If the learned policy reaches BLOCK, it does not contact the weather service while below 55% and instead uses cached data when available. Sunset remains a local 365-day cache/calculation and does not require Internet access.
+Revision 9 changes the policy from cache-first to Internet-first.
 
-Git backups and the weekly j03.page version check now consult the learned battery policy instead of using a blanket 55% cutoff. They record their own battery-use samples around the network/disk activity.
+When T14FinishService needs weather or sunset information it normally requests current data from the Internet first. A successful online result is used immediately and also saved to the persistent cache for possible later offline use.
 
-The hard disk-space gate remains unchanged: if less than 10 GiB is free, T14FinishService does not perform normal state/cache writes or high-level work.
+The persistent cache is read only when Internet data is unavailable, times out, returns invalid data, or when the adaptive low-battery policy intentionally suppresses a network request. If no cached sunset exists for an offline date, T14FinishService can still calculate sunset locally using its astronomical calculation.
 
-## Useful commands
+## Sunset retention
+
+At service startup, T14FinishService maintains at least 365 days of future sunset values in `sunset-365.json`. Existing entries are retained rather than discarded. That means the file gradually contains historical sunset values as time passes while continuing to maintain a forward-looking year of sunset information.
+
+Online forecast sunsets are also persisted in `weather.json` alongside the weather forecast dates returned by the provider.
+
+## Weather retention
+
+When an online forecast succeeds, every forecast date returned by the weather provider is stored in `weather.json`, not only the current day. T14FinishService keeps older entries, so successful forecasts become historical cached records across reboots.
+
+Weather providers do not provide a dependable 365-day future weather forecast. Revision 9 therefore caches as much future weather information as the provider returns and grows historical weather coverage over time rather than fabricating long-range forecasts.
+
+## Existing safety policy
+
+The disk rule remains a hard write-safety gate:
+
+```text
+At least 10 GiB free disk space
+```
+
+The 55% battery threshold remains adaptive rather than a blanket shutdown. Low-cost operations such as reading local files, reading cache data, and calculating deadlines can continue below 55%. Network, Git, build, and other potentially higher-drain features can be minimized or blocked according to the learned battery policy.
+
+## Install
+
+```bash
+cd ~/Downloads
+unzip T14FinishService-v9.zip
+cd T14FinishService_v9_package
+./install.sh
+```
+
+The installer may ask for your sudo password once so it can create:
+
+```text
+/var/cache/t14finishservice
+```
+
+The project itself remains installed at:
+
+```text
+/home/we6jbo/Projects/T14FinishService
+```
+
+## Verify
 
 ```bash
 t14-finish ping
 t14-finish status
 t14-finish deadline
-t14-finish coding-state
 t14-finish coding-state --json
-t14-finish battery-policy --json
 ```
 
-Direct battery helper commands:
+Check the persistent cache:
 
 ```bash
-t14finish-battery-monitor report
-t14finish-battery-monitor policy weather_network
-t14finish-battery-monitor policy git_backup
-t14finish-battery-monitor policy version_check
+ls -lh /var/cache/t14finishservice
+python3 -m json.tool /var/cache/t14finishservice/sunset-365.json | head -80
+python3 -m json.tool /var/cache/t14finishservice/weather.json | head -80
 ```
 
-Timer verification:
+After the service has started successfully, `sunset-365.json` should contain at least 365 forward sunset entries. `weather.json` will appear after a successful online weather request.
+
+## Offline test
+
+After the cache has been populated, disconnect the network temporarily and run:
 
 ```bash
-systemctl --user status t14finish-battery-monitor.timer
-systemctl --user list-timers | grep t14finish-battery
+t14-finish deadline
+t14-finish coding-state --json
 ```
 
-## Existing behavior retained
+The service should use cached weather/sunset information when that date is present. If cached weather is unavailable, it uses the existing conservative non-rain rule; sunset can still fall back to the local astronomical calculation.
 
-The service still honors `WE6JBO_CONTEXT_FILE` (or `/home/we6jbo/.local/state/we6jbo-context/context.json`), the hidden-time policy, San Carlos/San Diego weather and sunset rules, the holiday/weekend/weekday/rain schedule, portable TG provenance metadata, 40-minute Git backup workflow, weekly j03.page update check, and package milestone tracking. Original Qt Creator template files remain preserved and are not compiled into the background-only service.
+## Qt Creator templates
 
-Package revision: 7 of the planned 19-revision development workflow.
+The original Qt Creator template files remain preserved:
+
+```text
+main.cpp
+mainwindow.cpp
+mainwindow.h
+mainwindow.ui
+```
+
+The background service continues to build from `service_main.cpp`, `finishservice.cpp`, and `finishservice.h`.
+
+## Provenance identifiers
+
+The project continues to embed:
+
+```text
+TG564843
+TG333041
+TG323932
+TG610982
+TG148675
+```
+
+and retains `tg_context_snapshot.json` for portable provenance without requiring the private local registry.
+
+## Project milestone
+
+This package is revision 9 of the planned 19-revision development workflow. Revision 12 is the next checkpoint, when feature development should begin shifting toward completion and validation.
