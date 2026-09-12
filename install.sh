@@ -5,7 +5,7 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="/home/we6jbo/Projects/T14FinishService"
 STATE_DIR="/home/we6jbo/.T14FinishService_backup"
 STATUS="$STATE_DIR/status.json"
-PACKAGE_REVISION=12
+PACKAGE_REVISION=13
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 PREBACKUP="$STATE_DIR/preinstall-$STAMP"
 
@@ -58,7 +58,7 @@ A future built-in AI that has explicit permission to edit local files may modify
 TXT
 fi
 
-# Revision 12 adds persistent user-editable MOTD/AI instruction configuration while preserving the external-helper separation.
+# Revision 13 adds the final-build TG reminder when the coding cutoff has been reached before 8:00 PM.
 # /var/cache is appropriate for regenerable data that should survive normal reboots.
 CACHE_DIR="/var/cache/t14finishservice"
 CACHE_OWNER="$(id -un)"
@@ -151,11 +151,11 @@ if not any(isinstance(x,dict) and x.get('revision') == revision for x in history
     history.append({
         "revision":revision,
         "installed_at":iso,
-        "package":"T14FinishService-v12.zip",
+        "package":"T14FinishService-v13.zip",
         "install_commands":[
             "cd ~/Downloads",
-            "unzip T14FinishService-v12.zip",
-            "cd T14FinishService_v12_package",
+            "unzip T14FinishService-v13.zip",
+            "cd T14FinishService_v13_package",
             "./install.sh"
         ]
     })

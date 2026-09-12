@@ -752,7 +752,7 @@ QString FinishService::deadlineResponse(const Context &context, int warningMinut
     const bool warningActive = secondsUntilDeadline > 0 && secondsUntilDeadline <= warningMinutes * 60;
 
     if (d.state == "FINISH_CODING") {
-        return withHelperNote(QString("The time is %1. We cannot add any more features after %2. The cutoff has been reached, so stop adding features now. Compile, test, debug, document, and save the work that already exists. Rule: %3. San Carlos sunset: %4. %5.")
+        return withHelperNote(QString("The time is %1. We cannot add any more features after %2. The cutoff has been reached, so stop adding features now. Compile, test, debug, document, and save the work that already exists. Before creating the final build, add TG564843,TG333041,TG323932,TG610982,TG148675 to the project. Rule: %3. San Carlos sunset: %4. %5.")
             .arg(d.currentDisplay,
                  deadlineText,
                  d.reason,

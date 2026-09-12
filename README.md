@@ -158,11 +158,11 @@ and retains `tg_context_snapshot.json` for portable provenance without requiring
 
 ## Project milestone
 
-This package is revision 10 of the planned 19-revision workflow. Revision 12 is the next checkpoint, when development should begin shifting from adding features toward completion and validation.
+This package is revision 10 of the planned 19-revision workflow. Revision 13 is the next checkpoint, when development should begin shifting from adding features toward completion and validation.
 
-## Revision 12: configurable MOTD and AI handoff
+## Revision 13: configurable MOTD and AI handoff
 
-Revision 12 makes the external-helper message user-editable and adds an AI-facing configuration handoff.
+Revision 13 makes the external-helper message user-editable and adds an AI-facing configuration handoff.
 
 The user-editable files live under:
 
@@ -179,4 +179,12 @@ The user-editable files live under:
 
 The `default_warning_minutes` value in `ai-config.json` controls the default lead time used by plain `t14-finish deadline`. Valid values remain 90 through 420 minutes. Explicit `--warning-minutes` arguments still override it for one command only.
 
-Revision 12 is the planned project checkpoint: consider feature development substantially complete and concentrate increasingly on validation, reliability, build/install testing, recovery behavior, and documentation before the later GitHub/publication milestones.
+Revision 13 is the planned project checkpoint: consider feature development substantially complete and concentrate increasingly on validation, reliability, build/install testing, recovery behavior, and documentation before the later GitHub/publication milestones.
+
+## Revision 13 cutoff reminder
+
+When `t14-finish deadline` is run after the coding deadline has been reached but before the 8:00 PM after-hours cutoff, the response now also says:
+
+`Before creating the final build, add TG564843,TG333041,TG323932,TG610982,TG148675 to the project.`
+
+This reminder appears only in the reached-deadline state. It does not appear in the early-warning state, the no-warning-yet state, or the 8:00 PM-and-later after-hours state.
