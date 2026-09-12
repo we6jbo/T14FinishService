@@ -29,7 +29,7 @@ namespace {
 constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
-constexpr int kPackageRevision = 9;
+constexpr int kPackageRevision = 10;
 constexpr const char *kProjectId = "t14-finish-service-v1";
 constexpr const char *kCodes = "TG564843,TG333041,TG323932,TG610982,TG148675";
 
@@ -702,7 +702,7 @@ FinishService::Decision FinishService::makeDecision(const Context &context) cons
     return d;
 }
 
-QString FinishService::deadlineResponse(const Context &context) const
+QString FinishService::deadlineResponse(const Context &context, int warningMinutes) const
 {
     const Decision d = makeDecision(context);
     if (d.state == "STOP_SAFETY")
@@ -724,9 +724,28 @@ QString FinishService::deadlineResponse(const Context &context) const
         weatherText = "Rain forecast unavailable; conservative non-rain schedule used";
     }
 
-    return QString("The time is %1. Finish writing new program features by %2. Then compile, test, debug, document, and save. Rule: %3. San Carlos sunset: %4. %5.")
+    const QString deadlineText = d.deadline.toString("h:mm AP");
+    const int secondsUntilDeadline = d.currentTime.secsTo(d.deadline);
+    const bool warningActive = secondsUntilDeadline > 0 && secondsUntilDeadline <= warningMinutes * 60;
+
+    if (d.state == "FINISH_CODING") {
+        return QString("The time is %1. We cannot add any more features after %2. The cutoff has been reached, so stop adding features now. Compile, test, debug, document, and save the work that already exists. Rule: %3. San Carlos sunset: %4. %5.")
+            .arg(d.currentDisplay,
+                 deadlineText,
+                 d.reason,
+                 d.sunset.toString("h:mm AP"),
+                 weatherText);
+    }
+
+    if (!warningActive) {
+        return QString("The time is %1. No finish-up warning is needed yet. T14FinishService will display the stop-coding warning when the cutoff is within %2 minutes. For unusually long work, ChatGPT may request an earlier warning with 't14-finish deadline --warning-minutes N', where N must be from 90 through 420; this changes only when the warning appears, never the actual stop time.")
+            .arg(d.currentDisplay)
+            .arg(warningMinutes);
+    }
+
+    return QString("The time is %1. Warning: we cannot add any more features after %2. Once it becomes %2, we have to stop adding features and switch to compiling, testing, debugging, documenting, and saving. Rule: %3. San Carlos sunset: %4. %5. If the current task is unusually long, ChatGPT may choose an earlier warning by running 't14-finish deadline --warning-minutes N', where N is 90 through 420 minutes; that changes only the warning lead time, not the %2 stop time.")
         .arg(d.currentDisplay,
-             d.deadline.toString("h:mm AP"),
+             deadlineText,
              d.reason,
              d.sunset.toString("h:mm AP"),
              weatherText);
@@ -865,7 +884,27 @@ QString FinishService::handleCommand(const QString &rawCommand)
         return "ERROR: " + contextError;
 
     if (command.compare("deadline", Qt::CaseInsensitive) == 0)
-        return deadlineResponse(context);
+        return deadlineResponse(context, 90);
+
+    if (command.startsWith("deadline ", Qt::CaseInsensitive)) {
+        const QStringList parts = command.split(' ', Qt::SkipEmptyParts);
+        int warningMinutes = -1;
+        if (parts.size() == 3 && parts.at(1).compare("--warning-minutes", Qt::CaseInsensitive) == 0) {
+            bool ok = false;
+            warningMinutes = parts.at(2).toInt(&ok);
+            if (!ok)
+                warningMinutes = -1;
+        } else if (parts.size() == 2 && parts.at(1).startsWith("--warning-minutes=", Qt::CaseInsensitive)) {
+            bool ok = false;
+            warningMinutes = parts.at(1).section('=', 1).toInt(&ok);
+            if (!ok)
+                warningMinutes = -1;
+        }
+
+        if (warningMinutes < 90 || warningMinutes > 420)
+            return "ERROR: --warning-minutes must be from 90 through 420 minutes.";
+        return deadlineResponse(context, warningMinutes);
+    }
     if (command.compare("coding-state", Qt::CaseInsensitive) == 0)
         return codingStateResponse(context, false);
     if (command.compare("coding-state --json", Qt::CaseInsensitive) == 0
@@ -912,7 +951,7 @@ QString FinishService::handleCommand(const QString &rawCommand)
         return compactJson(o);
     }
 
-    return "ERROR: commands are ping, status, deadline, coding-state, coding-state --json, battery-policy --json, codes";
+    return "ERROR: commands are ping, status, deadline [--warning-minutes 90..420], coding-state, coding-state --json, battery-policy --json, codes";
 }
 
 void FinishService::attemptTgRegistrationOnce()

@@ -83,7 +83,7 @@ private:
     bool currentTimeFromContext(const Context &context, QTime *time, QString *display, QString *error) const;
     Decision makeDecision(const Context &context) const;
     QString handleCommand(const QString &command);
-    QString deadlineResponse(const Context &context) const;
+    QString deadlineResponse(const Context &context, int warningMinutes = 90) const;
     QString codingStateResponse(const Context &context, bool asJson) const;
     bool specialDay(const QDate &date) const;
     int sunsetOffsetMinutes(const Context &context) const;

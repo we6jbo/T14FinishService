@@ -5,13 +5,13 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="/home/we6jbo/Projects/T14FinishService"
 STATE_DIR="/home/we6jbo/.T14FinishService_backup"
 STATUS="$STATE_DIR/status.json"
-PACKAGE_REVISION=9
+PACKAGE_REVISION=10
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 PREBACKUP="$STATE_DIR/preinstall-$STAMP"
 
 mkdir -p "$TARGET" "$STATE_DIR" "$PREBACKUP" /home/we6jbo/.local/bin /home/we6jbo/.config/systemd/user
 
-# Revision 9 keeps the persistent Internet fallback cache outside /home/we6jbo.
+# Revision 10 keeps the persistent Internet fallback cache outside /home/we6jbo/.
 # /var/cache is appropriate for regenerable data that should survive normal reboots.
 CACHE_DIR="/var/cache/t14finishservice"
 CACHE_OWNER="$(id -un)"
@@ -104,11 +104,11 @@ if not any(isinstance(x,dict) and x.get('revision') == revision for x in history
     history.append({
         "revision":revision,
         "installed_at":iso,
-        "package":"T14FinishService-v9.zip",
+        "package":"T14FinishService-v10.zip",
         "install_commands":[
             "cd ~/Downloads",
-            "unzip T14FinishService-v9.zip",
-            "cd T14FinishService_v9_package",
+            "unzip T14FinishService-v10.zip",
+            "cd T14FinishService_v10_package",
             "./install.sh"
         ]
     })
@@ -157,6 +157,7 @@ printf 'Pre-install backup: %s\n' "$PREBACKUP"
 printf 'Package/status: cat %s\n' "$STATUS"
 printf 'Test: t14-finish ping\n'
 printf 'Deadline: t14-finish deadline\n'
+printf 'Earlier warning example: t14-finish deadline --warning-minutes 180\n'
 printf 'AI state: t14-finish coding-state\n'
 printf 'AI JSON: t14-finish coding-state --json\n'
 printf 'Version timer: systemctl --user status t14finish-version-check.timer\n'

@@ -1,47 +1,80 @@
-# T14FinishService v0.9 / Package Revision 9
+# T14FinishService v1.0 / Package Revision 10
 
-T14FinishService is a background-only Qt/C++ service for the Manjaro T14. It keeps the existing battery, disk-space, weather, sunset, schedule, coding-state, Git backup, weekly version-check, provenance, and project-milestone behavior from earlier revisions.
+T14FinishService is a background-only Qt/C++ service for the Manjaro T14. Revision 10 keeps the existing battery, disk-space, San Carlos weather, sunset, persistent cache, schedule, coding-state, Git backup, weekly update-check, provenance, and milestone behavior while changing how human-facing deadline warnings work.
 
-## Revision 9: persistent offline cache outside the home directory
+## Revision 10: stop-coding warning window
 
-Revision 9 moves the active weather/sunset cache outside `/home/we6jbo/` to:
+The actual coding cutoff is still calculated from the same schedule rules. Revision 10 changes only when the human-facing `deadline` command warns about it.
+
+By default, T14FinishService does **not** display the stop-coding deadline until the cutoff is within 90 minutes. For example, if the calculated stop time is 2:48 PM:
 
 ```text
-/var/cache/t14finishservice/
+9:00 AM  -> no stop-coding warning yet
+1:18 PM  -> warning window begins
+2:00 PM  -> warning is displayed
+2:48 PM  -> stop adding features immediately
 ```
 
-The installer creates that directory with ownership for the current user. Because `/var/cache` is outside the home directory and normally survives ordinary reboots, the cached information remains available after restarting the T14.
+Before the warning window, `t14-finish deadline` gives a short message indicating that no finish-up warning is needed yet. It intentionally does not print the future cutoff in that early message.
 
-The active cache files are:
+Inside the warning window it says, in substance:
+
+```text
+Warning: we cannot add any more features after 2:48 PM. Once it becomes 2:48 PM, we have to stop adding features and switch to compiling, testing, debugging, documenting, and saving.
+```
+
+Once the cutoff has been reached, it says that the cutoff has been reached and that no more features may be added.
+
+## Adjustable warning lead time
+
+The default warning lead time is 90 minutes. It can be changed for a particular request with:
+
+```bash
+t14-finish deadline --warning-minutes 180
+```
+
+or:
+
+```bash
+t14-finish deadline --warning-minutes=180
+```
+
+The accepted range is:
+
+```text
+minimum: 90 minutes (1 hour 30 minutes)
+maximum: 420 minutes (7 hours)
+```
+
+Values outside that range are rejected. Changing `--warning-minutes` changes only how early the warning appears. It never changes the real stop time.
+
+The warning text also tells ChatGPT that, when a coding task is unusually long, it may choose a larger warning window in the 90-420 minute range. This lets an assistant warn earlier when wrapping up a large feature will reasonably take longer, while preserving the same hard cutoff.
+
+## Coding-state behavior
+
+The machine-readable state commands continue to expose the actual state independently of whether the human warning is currently visible:
+
+```bash
+t14-finish coding-state
+t14-finish coding-state --json
+```
+
+This is intentional. A coding assistant can continue to use the structured state for automation while the ordinary `deadline` output avoids distracting the user many hours before the cutoff.
+
+At or after the calculated stop time, the state remains `FINISH_CODING`, meaning no new features should be started. At 8:00 PM or later, the existing `AFTER_HOURS` policy remains in effect and no new deadline is created until the next day.
+
+## Persistent cache
+
+The persistent cache remains outside the home directory:
 
 ```text
 /var/cache/t14finishservice/weather.json
 /var/cache/t14finishservice/sunset-365.json
 ```
 
-The installer will copy the old revision-8 cache into `/var/cache/t14finishservice/` if useful files exist and the new cache does not already contain them. The old home-directory cache is not used by revision 9.
+Internet data is preferred when available. The cache is used when Internet data is unavailable or when the adaptive low-battery policy suppresses network activity. Sunset coverage continues to maintain at least 365 future dates while retaining historical entries. Weather retains as much future forecast information as the provider supplies and preserves older observations as history.
 
-## Internet-first behavior
-
-Revision 9 changes the policy from cache-first to Internet-first.
-
-When T14FinishService needs weather or sunset information it normally requests current data from the Internet first. A successful online result is used immediately and also saved to the persistent cache for possible later offline use.
-
-The persistent cache is read only when Internet data is unavailable, times out, returns invalid data, or when the adaptive low-battery policy intentionally suppresses a network request. If no cached sunset exists for an offline date, T14FinishService can still calculate sunset locally using its astronomical calculation.
-
-## Sunset retention
-
-At service startup, T14FinishService maintains at least 365 days of future sunset values in `sunset-365.json`. Existing entries are retained rather than discarded. That means the file gradually contains historical sunset values as time passes while continuing to maintain a forward-looking year of sunset information.
-
-Online forecast sunsets are also persisted in `weather.json` alongside the weather forecast dates returned by the provider.
-
-## Weather retention
-
-When an online forecast succeeds, every forecast date returned by the weather provider is stored in `weather.json`, not only the current day. T14FinishService keeps older entries, so successful forecasts become historical cached records across reboots.
-
-Weather providers do not provide a dependable 365-day future weather forecast. Revision 9 therefore caches as much future weather information as the provider returns and grows historical weather coverage over time rather than fabricating long-range forecasts.
-
-## Existing safety policy
+## Safety behavior
 
 The disk rule remains a hard write-safety gate:
 
@@ -49,27 +82,27 @@ The disk rule remains a hard write-safety gate:
 At least 10 GiB free disk space
 ```
 
-The 55% battery threshold remains adaptive rather than a blanket shutdown. Low-cost operations such as reading local files, reading cache data, and calculating deadlines can continue below 55%. Network, Git, build, and other potentially higher-drain features can be minimized or blocked according to the learned battery policy.
+The 55% battery threshold remains adaptive rather than a blanket shutdown. Cheap local work such as cache reads and deadline calculations can continue below 55%, while higher-drain operations may be minimized or blocked according to measured battery behavior.
 
 ## Install
 
 ```bash
 cd ~/Downloads
-unzip T14FinishService-v9.zip
-cd T14FinishService_v9_package
+unzip T14FinishService-v10.zip
+cd T14FinishService_v10_package
 ./install.sh
 ```
 
-The installer may ask for your sudo password once so it can create:
-
-```text
-/var/cache/t14finishservice
-```
-
-The project itself remains installed at:
+The project remains installed at:
 
 ```text
 /home/we6jbo/Projects/T14FinishService
+```
+
+The persistent cache remains at:
+
+```text
+/var/cache/t14finishservice
 ```
 
 ## Verify
@@ -78,29 +111,19 @@ The project itself remains installed at:
 t14-finish ping
 t14-finish status
 t14-finish deadline
+t14-finish deadline --warning-minutes 180
+t14-finish coding-state
 t14-finish coding-state --json
 ```
 
-Check the persistent cache:
+Invalid warning windows can be checked with:
 
 ```bash
-ls -lh /var/cache/t14finishservice
-python3 -m json.tool /var/cache/t14finishservice/sunset-365.json | head -80
-python3 -m json.tool /var/cache/t14finishservice/weather.json | head -80
+t14-finish deadline --warning-minutes 89
+t14-finish deadline --warning-minutes 421
 ```
 
-After the service has started successfully, `sunset-365.json` should contain at least 365 forward sunset entries. `weather.json` will appear after a successful online weather request.
-
-## Offline test
-
-After the cache has been populated, disconnect the network temporarily and run:
-
-```bash
-t14-finish deadline
-t14-finish coding-state --json
-```
-
-The service should use cached weather/sunset information when that date is present. If cached weather is unavailable, it uses the existing conservative non-rain rule; sunset can still fall back to the local astronomical calculation.
+Both should return an error saying the value must be from 90 through 420 minutes.
 
 ## Qt Creator templates
 
@@ -131,4 +154,4 @@ and retains `tg_context_snapshot.json` for portable provenance without requiring
 
 ## Project milestone
 
-This package is revision 9 of the planned 19-revision development workflow. Revision 12 is the next checkpoint, when feature development should begin shifting toward completion and validation.
+This package is revision 10 of the planned 19-revision workflow. Revision 12 is the next checkpoint, when development should begin shifting from adding features toward completion and validation.
