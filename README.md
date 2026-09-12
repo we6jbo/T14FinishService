@@ -188,3 +188,9 @@ When `t14-finish deadline` is run after the coding deadline has been reached but
 `Before creating the final build, add TG564843,TG333041,TG323932,TG610982,TG148675 to the project.`
 
 This reminder appears only in the reached-deadline state. It does not appear in the early-warning state, the no-warning-yet state, or the 8:00 PM-and-later after-hours state.
+
+## Revision 14 maintenance/documentation update
+
+Revision 14 adds extensive maintenance comments and `MAINTAINERS.md`, and makes the Qt-built executable useful as a command-line front end when arguments are supplied. `./T14FinishService ai` now delegates to the installed `t14-finish ai` command instead of silently attempting to start a second background server.
+
+It also adds `9579.txt` containing a 1920 Karel Čapek *R.U.R.* quote about machine intelligence and a read-only checker, `t14finish-9579-check`. The checker verifies both the local project file and the public GitHub `master` branch. It never commits or pushes automatically.

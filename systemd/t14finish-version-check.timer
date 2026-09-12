@@ -1,3 +1,6 @@
+# T14FinishService systemd timer: t14finish-version-check.timer
+# Installed into ~/.config/systemd/user/. After edits run systemctl --user daemon-reload.
+# Keep these as per-user units; do not require a system-wide root daemon.
 [Unit]
 Description=T14FinishService weekly version-check scheduler
 

@@ -1,3 +1,20 @@
+/*
+ * T14FinishService core implementation
+ * ------------------------------------
+ * MAINTENANCE OVERVIEW:
+ * - Constants near the top define localhost port, safety thresholds, default San
+ *   Carlos coordinates, weather/cache behavior, and portable TG identifiers.
+ * - start()/onNewConnection() manage the background TCP service.
+ * - context/safety helpers read WE6JBO context, disk, and battery state.
+ * - weather/cache/sunset helpers prefer live Internet data and preserve persistent
+ *   fallback data under /var/cache/t14finishservice.
+ * - makeDecision()/deadlineResponse()/codingStateResponse() implement scheduling.
+ * - handleCommand() is the text protocol entry point for scripts/t14-finish.
+ * - battery policy calls record/consult telemetry but must keep cheap local reads
+ *   available under 55% unless evidence shows a meaningful cost.
+ *
+ * Keep user-visible time in 12-hour AM/PM format. Respect hidden-time context.
+ */
 #include "finishservice.h"
 
 #include <QCoreApplication>
@@ -25,11 +42,12 @@
 
 #include <cmath>
 
+// ===== Compile-time policy and helper constants =====
 namespace {
 constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
-constexpr int kPackageRevision = 12;
+constexpr int kPackageRevision = 14;
 constexpr const char *kProjectId = "t14-finish-service-v1";
 constexpr const char *kCodes = "TG564843,TG333041,TG323932,TG610982,TG148675";
 
@@ -89,6 +107,7 @@ static double radToDeg(double radians)
 }
 }
 
+// ===== Service startup and localhost protocol =====
 FinishService::FinishService(QObject *parent) : QObject(parent)
 {
     const QString configured = qEnvironmentVariable("T14FINISH_PROJECT_ROOT");
@@ -141,6 +160,7 @@ void FinishService::onNewConnection()
     }
 }
 
+// ===== Machine context and safety =====
 QString FinishService::contextPath() const
 {
     const QByteArray env = qgetenv("WE6JBO_CONTEXT_FILE");
@@ -219,6 +239,7 @@ FinishService::Safety FinishService::checkSafety() const
     return s;
 }
 
+// ===== Persistent weather/sunset cache =====
 QString FinishService::cacheDirectory() const
 {
     return QStringLiteral("/var/cache/t14finishservice");

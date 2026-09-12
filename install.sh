@@ -5,7 +5,7 @@ SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="/home/we6jbo/Projects/T14FinishService"
 STATE_DIR="/home/we6jbo/.T14FinishService_backup"
 STATUS="$STATE_DIR/status.json"
-PACKAGE_REVISION=13
+PACKAGE_REVISION=14
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 PREBACKUP="$STATE_DIR/preinstall-$STAMP"
 
@@ -85,7 +85,7 @@ FILES=(
   CMakeLists.txt CMakeLists.template-original.txt
   main.cpp mainwindow.cpp mainwindow.h mainwindow.ui
   service_main.cpp finishservice.cpp finishservice.h
-  tg_context_snapshot.json README.md 3751.txt
+  tg_context_snapshot.json README.md MAINTAINERS.md 3751.txt 9579.txt
 )
 for f in "${FILES[@]}"; do
     if [[ -e "$TARGET/$f" ]]; then
@@ -101,7 +101,7 @@ for f in main.cpp mainwindow.cpp mainwindow.h mainwindow.ui; do
     fi
 done
 
-for f in CMakeLists.txt CMakeLists.template-original.txt service_main.cpp finishservice.cpp finishservice.h tg_context_snapshot.json README.md; do
+for f in CMakeLists.txt CMakeLists.template-original.txt service_main.cpp finishservice.cpp finishservice.h tg_context_snapshot.json README.md MAINTAINERS.md; do
     cp -a "$SOURCE_DIR/$f" "$TARGET/$f"
 done
 
@@ -109,11 +109,15 @@ if [[ ! -e "$TARGET/3751.txt" ]]; then
     cp -a "$SOURCE_DIR/3751.txt" "$TARGET/3751.txt"
 fi
 
+# Revision 14 publication marker. Ensure the requested local file exists.
+cp -a "$SOURCE_DIR/9579.txt" "$TARGET/9579.txt"
+
 mkdir -p "$TARGET/scripts" "$TARGET/systemd"
 cp -a "$SOURCE_DIR/scripts/t14-finish" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/scripts/t14finish-git-backup" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/scripts/t14finish-version-check" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/scripts/t14finish-battery-monitor" "$TARGET/scripts/"
+cp -a "$SOURCE_DIR/scripts/t14finish-9579-check" "$TARGET/scripts/"
 cp -a "$SOURCE_DIR/systemd/"*.service "$TARGET/systemd/"
 cp -a "$SOURCE_DIR/systemd/"*.timer "$TARGET/systemd/"
 cp -a "$SOURCE_DIR/install.sh" "$TARGET/install.sh"
@@ -123,6 +127,7 @@ install -m 0755 "$TARGET/scripts/t14-finish" /home/we6jbo/.local/bin/t14-finish
 install -m 0755 "$TARGET/scripts/t14finish-git-backup" /home/we6jbo/.local/bin/t14finish-git-backup
 install -m 0755 "$TARGET/scripts/t14finish-version-check" /home/we6jbo/.local/bin/t14finish-version-check
 install -m 0755 "$TARGET/scripts/t14finish-battery-monitor" /home/we6jbo/.local/bin/t14finish-battery-monitor
+install -m 0755 "$TARGET/scripts/t14finish-9579-check" /home/we6jbo/.local/bin/t14finish-9579-check
 install -m 0644 "$TARGET/systemd/t14-finish-service.service" /home/we6jbo/.config/systemd/user/t14-finish-service.service
 install -m 0644 "$TARGET/systemd/t14finish-git-backup.service" /home/we6jbo/.config/systemd/user/t14finish-git-backup.service
 install -m 0644 "$TARGET/systemd/t14finish-git-backup.timer" /home/we6jbo/.config/systemd/user/t14finish-git-backup.timer
@@ -151,11 +156,11 @@ if not any(isinstance(x,dict) and x.get('revision') == revision for x in history
     history.append({
         "revision":revision,
         "installed_at":iso,
-        "package":"T14FinishService-v13.zip",
+        "package":"T14FinishService-v14.zip",
         "install_commands":[
             "cd ~/Downloads",
-            "unzip T14FinishService-v13.zip",
-            "cd T14FinishService_v13_package",
+            "unzip T14FinishService-v14.zip",
+            "cd T14FinishService_v14_package",
             "./install.sh"
         ]
     })
@@ -199,6 +204,9 @@ systemctl --user enable --now t14finish-battery-monitor.timer
 
 /home/we6jbo/.local/bin/t14finish-git-backup || true
 
+# Read-only publication-marker verification. Missing GitHub content is reported, not auto-pushed.
+/home/we6jbo/.local/bin/t14finish-9579-check || true
+
 printf '\nInstalled T14FinishService package revision %s into %s\n' "$PACKAGE_REVISION" "$TARGET"
 printf 'Pre-install backup: %s\n' "$PREBACKUP"
 printf 'Package/status: cat %s\n' "$STATUS"
@@ -220,3 +228,6 @@ printf 'Sunset cache: python3 -m json.tool /var/cache/t14finishservice/sunset-36
 printf 'Version state: python3 -m json.tool /home/we6jbo/.T14FinishService_backup/status.json\n'
 printf '\nIf the service fails to start, check whether a Qt Creator test copy already owns port 45454:\n'
 printf '  ss -ltnp | grep 45454\n'
+
+printf '9579 marker check: t14finish-9579-check\n'
+printf 'Qt-built CLI test: /home/we6jbo/Projects/T14FinishService/build/Desktop_Debug/T14FinishService ai\n'

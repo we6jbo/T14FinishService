@@ -1,3 +1,6 @@
+# T14FinishService systemd service: t14finish-version-check.service
+# Installed into ~/.config/systemd/user/. After edits run systemctl --user daemon-reload.
+# Keep these as per-user units; do not require a system-wide root daemon.
 [Unit]
 Description=T14FinishService weekly public version check
 After=network-online.target

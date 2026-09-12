@@ -1,3 +1,17 @@
+/*
+ * T14FinishService core service declaration
+ * -----------------------------------------
+ * This header is the maintenance map for the background service.  The small
+ * structs carry parsed machine context, safety state, weather, and final timing
+ * decisions.  Private methods are grouped by responsibility: context/safety,
+ * weather/cache/sunset, decision formatting, TG registration, and battery policy.
+ *
+ * When adding a new command:
+ *   1. Declare any helper here.
+ *   2. Implement it in finishservice.cpp.
+ *   3. Add command parsing in handleCommand().
+ *   4. If users invoke it through t14-finish, update scripts/t14-finish too.
+ */
 #pragma once
 
 #include <QObject>
@@ -9,6 +23,7 @@
 
 class QTcpSocket;
 
+// Long-running localhost-only Qt service.
 class FinishService : public QObject
 {
     Q_OBJECT
@@ -20,6 +35,7 @@ private slots:
     void onNewConnection();
 
 private:
+    // Parsed WE6JBO context. Never infer/display time when timeVisible is false.
     struct Context {
         QDate date;
         QString weekday;
@@ -30,6 +46,7 @@ private:
         QString timePolicy;
     };
 
+    // Disk/battery snapshot. Disk is a hard write gate; battery is adaptive.
     struct Safety {
         bool ok = false;
         quint64 freeBytes = 0;
@@ -37,6 +54,7 @@ private:
         QString reason;
     };
 
+    // One day of weather/sunset information, from Internet or cache.
     struct WeatherDay {
         bool known = false;
         bool rainy = false;
@@ -48,6 +66,7 @@ private:
         QString error;
     };
 
+    // Final session decision used by human and machine-readable responses.
     struct Decision {
         bool ok = false;
         QString state;
@@ -66,6 +85,7 @@ private:
         QString weatherError;
     };
 
+    // TCP server is bound only to QHostAddress::LocalHost on port 45454.
     QTcpServer m_server;
     QString m_projectRoot;
 

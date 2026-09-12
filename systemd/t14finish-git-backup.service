@@ -1,3 +1,6 @@
+# T14FinishService systemd service: t14finish-git-backup.service
+# Installed into ~/.config/systemd/user/. After edits run systemctl --user daemon-reload.
+# Keep these as per-user units; do not require a system-wide root daemon.
 [Unit]
 Description=Check whether T14FinishService is due for a 40-minute GitHub backup
 After=network-online.target

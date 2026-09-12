@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# T14FinishService user-facing command wrapper.
+# Manage this file when adding MOTD/AI/config commands or changing how text commands
+# are sent to localhost port 45454. Runtime timing logic belongs in finishservice.cpp.
 set -euo pipefail
 
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
