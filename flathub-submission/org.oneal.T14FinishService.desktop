@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=T14FinishService
+Comment=Practice and learn fractions
+Exec=T14FinishService
+Icon=org.oneal.T14FinishService
+Terminal=false
+Categories=Education;
