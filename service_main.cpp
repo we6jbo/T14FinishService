@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
     // Any argument means the user is invoking the executable as a command-line
     // client/management tool rather than asking it to become another server copy.
     // This also avoids the old behavior where `./T14FinishService ai` silently
-    // attempted to start a second service and failed if port 45454 was occupied.
+    // attempted to start a second service and failed if the configured port was occupied.
     if (app.arguments().size() > 1)
         return runHelperCommand(app.arguments().mid(1));
 
@@ -83,8 +83,7 @@ int main(int argc, char *argv[])
     FinishService service;
     if (!service.start()) {
         QTextStream err(stderr);
-        err << "ERROR: T14FinishService could not listen on localhost port 45454.\n"
-            << "Another copy may already be running. Check: ss -ltnp | grep 45454\n";
+        err << service.startError() << "\n";
         return 1;
     }
 

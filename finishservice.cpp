@@ -44,7 +44,6 @@
 
 // ===== Compile-time policy and helper constants =====
 namespace {
-constexpr quint16 kPort = 45454;
 constexpr quint64 kMinimumFreeBytes = 10ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMinimumBatteryPercent = 55;
 constexpr int kPackageRevision = 15;
@@ -118,8 +117,62 @@ FinishService::FinishService(QObject *parent) : QObject(parent)
 
 bool FinishService::start()
 {
-    if (!m_server.listen(QHostAddress::LocalHost, kPort))
+    const QString configPath = QDir::homePath() + QStringLiteral("/.finishservice.json");
+    QFile configFile(configPath);
+
+    if (!configFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        m_startError = QStringLiteral(
+            "ERROR: T14FinishService cannot read %1.\n"
+            "The file must contain a valid TCP port, for example:\n"
+            "{\n  \\\"port\\\": 41728\n}\n"
+            "Both T14FinishService and t14-finish read the port from this file.")
+            .arg(configPath);
         return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(configFile.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        m_startError = QStringLiteral(
+            "ERROR: %1 does not contain valid JSON.\n"
+            "It must contain a port such as:\n"
+            "{\n  \\\"port\\\": 41728\n}")
+            .arg(configPath);
+        return false;
+    }
+
+    const QJsonValue portValue = document.object().value(QStringLiteral("port"));
+    if (!portValue.isDouble()) {
+        m_startError = QStringLiteral(
+            "ERROR: %1 must contain an integer \\\"port\\\" value from 1 through 65535.")
+            .arg(configPath);
+        return false;
+    }
+
+    const double rawPort = portValue.toDouble();
+    const int port = static_cast<int>(rawPort);
+    if (rawPort != static_cast<double>(port) || port < 1 || port > 65535) {
+        m_startError = QStringLiteral(
+            "ERROR: %1 contains an invalid port.\n"
+            "The port must be an integer from 1 through 65535.")
+            .arg(configPath);
+        return false;
+    }
+
+    m_port = static_cast<quint16>(port);
+
+    if (!m_server.listen(QHostAddress::LocalHost, m_port)) {
+        m_startError = QStringLiteral(
+            "ERROR: The configured T14FinishService port %1 is already in use or could not be opened.\n\n"
+            "Change the port in:\n%2\n\n"
+            "Both T14FinishService and the t14-finish client read the port from that file.\n"
+            "After changing it, restart t14-finish-service.service.\n\n"
+            "Qt network error: %3")
+            .arg(m_port)
+            .arg(configPath)
+            .arg(m_server.errorString());
+        return false;
+    }
 
     connect(&m_server, &QTcpServer::newConnection, this, &FinishService::onNewConnection);
 

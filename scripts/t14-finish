@@ -1,14 +1,37 @@
 #!/usr/bin/env bash
 # T14FinishService user-facing command wrapper.
 # Manage this file when adding MOTD/AI/config commands or changing how text commands
-# are sent to localhost port 45454. Runtime timing logic belongs in finishservice.cpp.
+# are sent to the localhost port configured in ~/.finishservice.json. Runtime timing logic belongs in finishservice.cpp.
 set -euo pipefail
 
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="$CONFIG_HOME/t14finishservice"
+PORT_CONFIG_FILE="$HOME/.finishservice.json"
 MOTD_FILE="$CONFIG_DIR/motd.txt"
 AI_CONFIG_FILE="$CONFIG_DIR/ai-config.json"
 PROGRAMMING_INSTRUCTIONS_FILE="$CONFIG_DIR/programming-instructions.txt"
+
+configured_service_port() {
+    python3 - "$PORT_CONFIG_FILE" <<'PYPORT'
+import json
+import sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+except FileNotFoundError:
+    print(f"ERROR: {path} does not exist.", file=sys.stderr)
+    raise SystemExit(2)
+except (OSError, json.JSONDecodeError) as exc:
+    print(f"ERROR: Cannot read valid JSON from {path}: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+port = data.get("port")
+if type(port) is not int or not (1 <= port <= 65535):
+    print(f'ERROR: {path} must contain an integer "port" from 1 through 65535.', file=sys.stderr)
+    raise SystemExit(2)
+print(port)
+PYPORT
+}
 
 DEFAULT_MOTD="NOTE FOR CHATGPT/OTHER CODING ASSISTANTS: t14-finish and T14FinishService are not part of the project currently being developed. They are external timing helpers used only to decide when feature work should stop. Do not add t14-finish, T14FinishService, or their files/code to the current project's source, ZIP/package, build system, documentation, or repository unless the user explicitly asks you to do so."
 
@@ -205,7 +228,15 @@ else
     command_text="$*"
 fi
 
-exec 3<>/dev/tcp/127.0.0.1/45454
+SERVICE_PORT="$(configured_service_port)"
+
+if ! exec 3<>"/dev/tcp/127.0.0.1/$SERVICE_PORT"; then
+    printf '\nERROR: Could not connect to T14FinishService on localhost port %s.\n' "$SERVICE_PORT" >&2
+    printf 'The port is configured in:\n  %s\n' "$PORT_CONFIG_FILE" >&2
+    printf 'Make sure the service is running and that both the service and client are using the same configuration file.\n' >&2
+    exit 1
+fi
+
 printf '%s\n' "$command_text" >&3
 IFS= read -r reply <&3 || true
 printf '%s\n' "$reply"

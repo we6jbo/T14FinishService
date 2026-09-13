@@ -30,6 +30,8 @@ class FinishService : public QObject
 public:
     explicit FinishService(QObject *parent = nullptr);
     bool start();
+    quint16 configuredPort() const { return m_port; }
+    QString startError() const { return m_startError; }
 
 private slots:
     void onNewConnection();
@@ -85,8 +87,10 @@ private:
         QString weatherError;
     };
 
-    // TCP server is bound only to QHostAddress::LocalHost on port 45454.
+    // Localhost TCP port is loaded from ~/.finishservice.json.
     QTcpServer m_server;
+    quint16 m_port = 0;
+    QString m_startError;
     QString m_projectRoot;
 
     QString contextPath() const;
